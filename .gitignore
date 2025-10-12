@@ -221,3 +221,7 @@ src/aecid-alert-aggregation/
 src/alert-data-set/
 src/extracted_dataset/
 src/*.zip
+src/metadata/
+src/out/
+src/models/
+src/*.log
