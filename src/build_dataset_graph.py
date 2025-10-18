@@ -37,6 +37,9 @@ description_vectors = np.load(os.path.join(extract_dir, 'vectorized_descr.npy'))
 df['description_vector'] = list(description_vectors)
 logger.info(f"Dataset shape: {df.shape}")
 
+# Drop all benign (or false_positive) logs
+df = df[df['attack_label'] == 'attack']
+
 # Ensure timestamp is datetime
 df[timestamp_col] = pd.to_datetime(df[timestamp_col], errors='coerce')
 df = df.dropna(subset=[timestamp_col])

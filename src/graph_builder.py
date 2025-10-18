@@ -1,186 +1,233 @@
-import threading
-import pandas as pd
-import numpy as np
-import networkx as nx
-from sentence_transformers import SentenceTransformer
 import os
-from sklearn.preprocessing import normalize
-import torch
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from itertools import combinations
+from typing import List
 from tqdm import tqdm
-import logging
-
-# --------- Helpers ----------
-def make_event_id(prefix, idx):
-    return f"{prefix}-{idx:08d}"
-
-def node_key(node_type, key):
-    return f"{node_type}:{key}"
+from sklearn.metrics.pairwise import cosine_similarity
+from datetime import timedelta
 
 
-# --------- Main builder ----------
 class GraphBuilder:
-    def __init__(self, 
-                 model_name: str = "all-MiniLM-L6-v2",
-                 similarity_threshold: float = 0.8,
-                 max_time_diff: int = 180):
-        """
-        model_name: SentenceTransformer model to use.
-        similarity_threshold: cosine similarity threshold to create an edge.
-        max_time_diff: maximum allowed time difference (in seconds) to connect logs temporally.
-        """
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.info("Loading GraphBuilder instance...")
-        self.embedder = SentenceTransformer(model_name)
-        self.similarity_threshold = similarity_threshold
-        self.max_time_diff = max_time_diff
+    """
+    Scalable Graph Builder for large log datasets (millions of rows).
 
-    def build_from_df(self, df: pd.DataFrame) -> nx.DiGraph:
-        """
-        Build a directed graph from a dataframe of logs.
+    Supports:
+    - 'train' mode: builds labeled subgraphs for GNN link prediction.
+    - 'inference' mode: builds candidate subgraphs from new unlabeled logs.
 
-        Each log becomes a node, and temporal/similarity-based edges
-        are added between logs that occur within a certain time window
-        and have similar semantic embeddings.
-        """
-        thread_name = threading.current_thread().name
-        self.logger.info(f"[{thread_name}] Starting graph build on {len(df)} logs")
+    Automatically splits large datasets into subgraphs (time-based or random sampling)
+    to keep each graph small enough for GNN training.
+    """
 
-        # === Data Cleaning ===
-        # Remove logs missing timestamp or description
-        df = df.dropna(subset=['@timestamp', 'rule_description']).reset_index(drop=True)
-        df['@timestamp'] = pd.to_datetime(df['@timestamp'])
+    def __init__(
+        self,
+        output_dir: str,
+        description_vectors: np.ndarray,
+        numeric_cols: List[str] = ['rule_level', 'rule_firedtimes'],
+        cat_cols: List[str] = ['rule_groups', 'rule_nist_800_53', 'rule_gdpr'],
+        max_nodes_per_graph: int = 1000,
+        candidate_edge_topk: int = 10,
+        time_window_minutes: int = 10,
+        neg_edge_ratio: float = 1.0,  # ratio of negatives to positives
+    ):
+        self.output_dir = output_dir
+        self.numeric_cols = numeric_cols
+        self.cat_cols = cat_cols
+        self.scaler = StandardScaler()
+        self.candidate_edge_topk = candidate_edge_topk
+        self.description_vectors = description_vectors
+        self.max_nodes_per_graph = max_nodes_per_graph
+        self.time_window_minutes = time_window_minutes
+        self.neg_edge_ratio = neg_edge_ratio
+        os.makedirs(self.output_dir, exist_ok=True)
 
-        # Identify if the group contains a single log
-        is_single_log = len(df) == 1
+    # =========================================================
+    # ---------------- FEATURE CONSTRUCTION -------------------
+    # =========================================================
+    def _preprocess_features(self, df: pd.DataFrame):
+        """Build numeric + categorical + embedding features."""
+        numeric = df[self.numeric_cols].fillna(0).to_numpy()
+        numeric_scaled = self.scaler.fit_transform(numeric)
 
-        # === Embedding Generation ===
-        # If the dataframe doesn't have precomputed vectors, encode descriptions
-        if 'description_vector' not in df.columns:
-            self.logger.info(f"[{thread_name}] Computing embeddings using SentenceTransformer...")
-            embeddings = self.embedder.encode(
-                df['rule_description'].tolist(),
-                normalize_embeddings=True,
-                device='cuda' if torch.cuda.is_available() else 'cpu',
-                show_progress_bar=False
-            )
+        # categorical one-hot encoding
+        cat_feats = []
+        for col in self.cat_cols:
+            cat_col = df[col].fillna('none').astype(str)
+            uniques = list(set(v for val in cat_col for v in val.split(',') if v))
+            uniques = uniques[:16]  # cap to reduce dimensionality
+            mapping = {v: i for i, v in enumerate(uniques)}
+            feat = np.zeros((len(cat_col), len(uniques)), dtype=np.float32)
+            for i, val in enumerate(cat_col):
+                for token in val.split(','):
+                    if token in mapping:
+                        feat[i, mapping[token]] = 1.0
+            cat_feats.append(feat)
+
+        if cat_feats:
+            cat_feats = np.concatenate(cat_feats, axis=1)
         else:
-            # Stack precomputed embeddings into a NumPy array
-            embeddings = np.vstack(df['description_vector'].values)
-            embeddings = normalize(embeddings)  # ensure unit-norm for cosine similarity
+            cat_feats = np.zeros((len(df), 0))
 
-        # === Sanity Checks ===
-        # Ensure embeddings match the number of logs and are 2D
-        if embeddings.ndim != 2 or embeddings.shape[0] != len(df):
-            self.logger.warning(f"[{thread_name}] Invalid embedding shape {embeddings.shape} for {len(df)} logs — skipping graph")
-            return nx.DiGraph(single_log_group=is_single_log)
+        # description embeddings
+        emb = self.description_vectors[:len(df)]
+        node_feats = np.concatenate([emb, numeric_scaled, cat_feats], axis=1).astype(np.float32)
+        return node_feats
 
-        # Handle NaN values safely
-        if np.any(np.isnan(embeddings)):
-            self.logger.warning(f"[{thread_name}] NaN values detected in embeddings — replacing with zeros")
-            embeddings = np.nan_to_num(embeddings)
+    # =========================================================
+    # ---------------- EDGE CREATION (TRAIN) -------------------
+    # =========================================================
+    def _make_edges_training(self, df: pd.DataFrame):
+        """
+        Create positive/negative edges with balanced sampling.
+        Positive = same attack_label, Negative = different.
+        """
+        ids = list(range(len(df)))
+        labels = df['attack_label'].to_numpy()
+        pos_edges = [(i, j) for i, j in combinations(ids, 2) if labels[i] == labels[j] and labels[i] != 'benign']
+        
+        # sample negatives to keep balance
+        all_pairs = list(combinations(ids, 2))
+        neg_candidates = [(i, j) for (i, j) in all_pairs if labels[i] != labels[j]]
+        if len(pos_edges) > 0:
+            num_neg = min(len(neg_candidates), int(len(pos_edges) * self.neg_edge_ratio))
+            neg_edges = np.random.choice(len(neg_candidates), num_neg, replace=False)
+            neg_edges = [neg_candidates[k] for k in neg_edges]
+        else:
+            neg_edges = []
 
-        # === Initialize Graph ===
-        G = nx.DiGraph(single_log_group=is_single_log)
+        edge_index = np.array(pos_edges + neg_edges, dtype=np.int64).T
+        edge_label = np.array([1] * len(pos_edges) + [0] * len(neg_edges), dtype=np.float32)
+        return edge_index, edge_label
 
-        # Add one node per log entry
-        for i, row in df.iterrows():
-            node_id = f"{row['agent_ip']}_{i}"
-            G.add_node(
-                node_id,
-                timestamp=row['@timestamp'],
-                agent_ip=row['agent_ip'],
-                description=row['rule_description'],
-                embedding=embeddings[i],
-                is_single_log=is_single_log
-            )
+    # =========================================================
+    # ---------------- EDGE CREATION (INFERENCE) ---------------
+    # =========================================================
+    def _make_edges_inference(self, node_feats: np.ndarray):
+        """Weak edge generator using cosine similarity (top-k)."""
+        sim = cosine_similarity(node_feats)
+        np.fill_diagonal(sim, 0.0)
 
-        # === Handle Single-Log Case ===
-        if is_single_log:
-            self.logger.info(f"[{thread_name}] Single-log group detected: {len(G.nodes)} node, {len(G.edges)} edges")
-            return G  # No edges to create, return early
+        edges = []
+        for i in range(sim.shape[0]):
+            topk_idx = np.argsort(sim[i])[-self.candidate_edge_topk:]
+            for j in topk_idx:
+                if sim[i, j] > 0:
+                    edges.append((i, j))
 
-        # === Prepare Data for Edge Creation ===
-        df_sorted = df.sort_values(by='@timestamp').reset_index(drop=True)
-        node_ids = [f"{df_sorted.loc[i, 'agent_ip']}_{df_sorted.index[i]}" for i in range(len(df_sorted))]
+        return np.array(edges, dtype=np.int64).T
 
-        self.logger.info(f"[{thread_name}] Building edges using vectorized similarity...")
+    # =========================================================
+    # ------------------- GRAPH BUILDING -----------------------
+    # =========================================================
+    def build_graph(self, df: pd.DataFrame, graph_id: str, mode: str = "train"):
+        node_feats = self._preprocess_features(df)
+        if mode == "train":
+            edge_index, edge_label = self._make_edges_training(df)
+        elif mode == "inference":
+            edge_index = self._make_edges_inference(node_feats)
+            edge_label = None
+        else:
+            raise ValueError("mode must be 'train' or 'inference'")
 
-        # === Build Edges (Time + Similarity Based) ===
-        for i in range(len(df_sorted) - 1):
-            t_i = df_sorted.loc[i, '@timestamp']
+        arrays_dict = {'node_feats': node_feats, 'edge_index': edge_index}
+        if edge_label is not None:
+            arrays_dict['edge_label'] = edge_label
 
-            # Compute time differences to all following logs
-            time_diffs = (df_sorted['@timestamp'][i + 1:] - t_i).dt.total_seconds().to_numpy()
+        out_path = os.path.join(self.output_dir, f"{graph_id}.npz")
+        self.save_npz(out_path, arrays_dict)
+        return out_path
 
-            # Identify valid neighbors within the time window
-            valid_mask = time_diffs <= self.max_time_diff
-            if not np.any(valid_mask):
-                continue  # No neighbors in time window
+    # =========================================================
+    # ------------------- GRAPH SPLITTING ----------------------
+    # =========================================================
+    def _split_by_agent_and_time(self, df: pd.DataFrame):
+        """Split logs per agent_ip and within time windows."""
+        df['@timestamp'] = pd.to_datetime(df['@timestamp'], errors='coerce')
+        valid_df = df.dropna(subset=['@timestamp'])
+        
+        subgraphs = []
+        for agent, group in valid_df.groupby('agent_ip'):
+            group = group.sort_values('@timestamp')
+            start, end = group['@timestamp'].min(), group['@timestamp'].max()
+            window = timedelta(minutes=self.time_window_minutes)
 
-            valid_j = np.where(valid_mask)[0] + (i + 1)  # shift to match df_sorted indices
+            current = start
+            while current < end:
+                next_t = current + window
+                mask = (group['@timestamp'] >= current) & (group['@timestamp'] < next_t)
+                chunk = group[mask]
+                if len(chunk) >= 5:
+                    subgraphs.append(chunk)
+                current = next_t
 
-            # Compute cosine similarity between current node and valid neighbors
-            sims = embeddings[i] @ embeddings[valid_j].T
-
-            # === Edge Creation ===
-            for idx, j in enumerate(valid_j):
-                if sims[idx] >= self.similarity_threshold:
-                    try:
-                        G.add_edge(
-                            node_ids[i],
-                            node_ids[j],
-                            weight=float(sims[idx]),
-                            time_diff=float(time_diffs[j - (i + 1)])
-                        )
-                    except Exception as edge_err:
-                        # Log full context for debugging if edge creation fails
-                        self.logger.exception(
-                            f"[{thread_name}] Failed to add edge "
-                            f"i={i}, j={j}, idx={idx}, len(time_diffs)={len(time_diffs)}, "
-                            f"sims_shape={sims.shape}, embeddings_shape={embeddings.shape}"
-                        )
-
-        # === Wrap Up ===
-        self.logger.info(f"[{thread_name}] Graph built: {len(G.nodes)} nodes, {len(G.edges)} edges")
-        return G
+            # include leftover logs not covered by windows
+            covered_idx = pd.concat(subgraphs).index if subgraphs else []
+            leftovers = group.drop(index=covered_idx, errors='ignore')
+            if not leftovers.empty:
+                subgraphs.append(leftovers)
+        return subgraphs
 
 
-    def graph_to_arrays(self, G: nx.DiGraph):
-        """Convert NetworkX DiGraph to TGN/GraphSAGE arrays."""
-        node2id = {node: idx for idx, node in enumerate(G.nodes())}
-        sources, destinations, timestamps, edge_feats = [], [], [], []
-        node_feats = []
+    def _split_large_attack(self, df: pd.DataFrame):
+        """
+        If attack has too many logs, randomly sample chunks to keep graphs manageable.
+        """
+        chunks = []
+        total = len(df)
+        indices = np.arange(total)
+        np.random.shuffle(indices)
+        for i in range(0, total, self.max_nodes_per_graph):
+            chunk_idx = indices[i:i+self.max_nodes_per_graph]
+            chunks.append(df.iloc[chunk_idx])
+        return chunks
 
-        for node in G.nodes():
-            node_feats.append(G.nodes[node]['embedding'])
+    # =========================================================
+    # ------------------- MAIN ENTRYPOINT ----------------------
+    # =========================================================
+    def build_graphs_from_dataframe(self, df: pd.DataFrame, group_col: str = "type_attack_label", mode: str = "train"):
+        """
+        Build a collection of graphs (training or inference).
+        - For training: builds multiple subgraphs per attack.
+        - For inference: builds one large candidate graph.
+        """
+        paths = []
 
-        for u, v, data in G.edges(data=True):
-            sources.append(node2id[u])
-            destinations.append(node2id[v])
-            timestamps.append(pd.Timestamp(G.nodes[v]['timestamp']).timestamp())
-            edge_feats.append([data['weight']])
+        if mode == "train":
+            assert group_col in df.columns, f"{group_col} column missing for training mode"
+            grouped = df.groupby(group_col)
 
-        arrays_dict = {
-            'sources': np.array(sources, dtype=np.int64),
-            'destinations': np.array(destinations, dtype=np.int64),
-            'timestamps': np.array(timestamps, dtype=np.float32),
-            'edge_feats': np.array(edge_feats, dtype=np.float32),
-            'node_feats': np.array(node_feats, dtype=np.float32),
-            'single_log_group': np.array([int(G.graph.get('single_log_group', False))])
-        }
-        return arrays_dict
+            for label, group in tqdm(grouped, desc=f"Building training graphs"):
+                # further split large attacks by time or sampling
+                if len(group) > self.max_nodes_per_graph:
+                    subgraphs = self._split_by_agent_and_time(group)
+                    if not subgraphs:  # fallback if timestamps not usable
+                        subgraphs = self._split_large_attack(group)
+                else:
+                    subgraphs = [group]
 
-    def save_npz(self, out_path: str, G: nx.DiGraph):
-        """Convert graph to arrays and save safely as .npz"""
+                for i, sg in enumerate(subgraphs):
+                    graph_id = f"{label}_chunk{i}"
+                    path = self.build_graph(sg.reset_index(drop=True), graph_id, mode)
+                    paths.append(path)
+        else:
+            # In inference mode: one big graph of recent logs
+            if len(df) > self.max_nodes_per_graph:
+                df = df.tail(self.max_nodes_per_graph)  # keep latest logs
+            graph_id = "inference_graph"
+            path = self.build_graph(df.reset_index(drop=True), graph_id, mode)
+            paths.append(path)
+
+        return paths
+
+    # =========================================================
+    # ------------------- SAVE GRAPH ---------------------------
+    # =========================================================
+    def save_npz(self, out_path: str, arrays_dict: dict):
         if os.path.exists(out_path):
-            self.logger.info(f"Graph already exists at {out_path}, skipping.")
+            print(f"Graph already exists at {out_path}, skipping.")
             return
-
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        arrays_dict = self.graph_to_arrays(G)
-        if len(arrays_dict['node_feats']) == 0:
-            raise ValueError(f"Graph {out_path} has no nodes!")
-
         np.savez_compressed(out_path, **arrays_dict)
-        tag = " (single-log group)" if arrays_dict['single_log_group'][0] == 1 else ""
-        self.logger.info(f"Saved graph to {out_path}{tag} with keys: {list(arrays_dict.keys())}")
+        print(f"Saved graph to {out_path} with keys: {list(arrays_dict.keys())}")
