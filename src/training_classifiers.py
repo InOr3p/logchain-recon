@@ -41,10 +41,10 @@ class WazuhLogClassifier:
         print("Loading data...")
         self.df = pd.read_parquet(self.data_path)
 
-        description_vectors = np.load(os.path.join(extract_dir, 'vectorized_descr.npy'))
+        description_vectors = np.load(os.path.join(EXTRACT_DIR, 'vectorized_descr.npy'))
         self.df['description_vector'] = list(description_vectors)
 
-        threshold = 700_000
+        threshold = 250_000
         if len(self.df) > threshold:
             print(f"Original dataset size: {len(self.df)}. Sampling down to {threshold} rows.")
             self.df = self.df.sample(n=threshold, random_state=42).reset_index(drop=True)
@@ -63,7 +63,7 @@ class WazuhLogClassifier:
         print("Loading data...")
         self.df = pd.read_parquet(self.data_path)
         
-        description_vectors = np.load(os.path.join(extract_dir, 'vectorized_descr.npy'))
+        description_vectors = np.load(os.path.join(EXTRACT_DIR, 'vectorized_descr.npy'))
         self.df['description_vector'] = list(description_vectors)
 
         # --- Configuration for the new dataset ---
@@ -155,7 +155,7 @@ class WazuhLogClassifier:
         """
         print("\nEngineering features...")
 
-        feature_list_path = os.path.join(extract_dir, "feature_columns.joblib")
+        feature_list_path = os.path.join(EXTRACT_DIR, "feature_columns.joblib")
 
         # --- Parse description_vector ---
         if isinstance(self.df['description_vector'].iloc[0], str):
@@ -1062,8 +1062,8 @@ class WazuhLogClassifier:
 np.random.seed(42)
 tf.random.set_seed(42)
 
-extract_dir = "extracted_dataset"
-DATA_PATH = os.path.join(extract_dir, "sorted_ds_with_labels.parquet")
+EXTRACT_DIR = "extracted_dataset"
+DATA_PATH = os.path.join(EXTRACT_DIR, "sorted_ds_with_labels.parquet")
 MODEL_PATH = "models"
 MODELS_TO_USE = ["LightGBM", "XGBoost", "CatBoost"]
 USE_RANDOM_SAMPLE = False  # True -> random sampling, False -> fixed/balanced
