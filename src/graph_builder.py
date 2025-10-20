@@ -1,3 +1,5 @@
+import ast
+from collections import Counter
 import os
 import numpy as np
 import pandas as pd
@@ -48,6 +50,7 @@ class GraphBuilder:
         self.ip_cols = ip_cols
         self.desc_col = desc_col
         self.scaler = StandardScaler() # Will be fit by fit_scaler()
+        self.cat_mappers = {}
         self.candidate_edge_topk = candidate_edge_topk
         self.min_nodes_per_graph = min_nodes_per_graph
         self.max_nodes_per_graph = max_nodes_per_graph
@@ -58,12 +61,38 @@ class GraphBuilder:
         self.window_size = window_size
         self.stride = stride
         os.makedirs(self.output_dir, exist_ok=True)
-        
+    
         self._scaler_fitted = False
+        self._mappers_fitted = False
 
     # =========================================================
     # FEATURE PREPROCESSING
     # =========================================================
+    
+    def _parse_list_cell(self, x) -> list:
+        # Handle NumPy arrays directly
+        if isinstance(x, np.ndarray):
+            return x.tolist()
+
+        # Handle real Python lists
+        if isinstance(x, list):
+            return x
+
+        # Handle None and NaN
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return []
+
+        # Handle string representations
+        if isinstance(x, str):
+            try:
+                parsed = ast.literal_eval(x)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+
+        # Fallback for unexpected types
+        return []
+
 
     def fit_scaler(self, df: pd.DataFrame):
         """
@@ -78,6 +107,34 @@ class GraphBuilder:
             print("Scaler fitted successfully.")
         else:
             warnings.warn("No numeric data provided to fit scaler. Scaler will not be used.")
+            
+    def fit_categorical_mappers(self, df: pd.DataFrame):
+        print("Fitting categorical mappers...")
+        self.cat_mappers = {}
+        df_copy = df.copy()
+
+        for col in self.cat_cols:
+            cat_col = df_copy[col].apply(self._parse_list_cell)
+
+            # Explode, drop NaNs, and get ALL unique values
+            all_tokens = cat_col.explode().dropna().unique()
+
+            if len(all_tokens) == 0:
+                print(f"  - No tokens found for '{col}'. Skipping.")
+                self.cat_mappers[col] = {}
+                continue
+
+            # Sort them to ensure a consistent, deterministic order
+            uniques = sorted(list(all_tokens))
+            
+            # Store the mapping
+            self.cat_mappers[col] = {v: i for i, v in enumerate(uniques)}
+            
+            print(f"  - For '{col}': found and using {len(uniques)} unique tokens.")
+            print(f"  - Tokens: {self.cat_mappers[col].keys()}")
+            
+        self._mappers_fitted = True
+        print("Categorical mappers fitted.")
             
     def _hash_string(self, text: str, dim: int) -> np.ndarray:
         """Return a fixed-length numeric hash embedding for a string."""
@@ -104,7 +161,11 @@ class GraphBuilder:
         if not self._scaler_fitted and self.numeric_cols:
             raise RuntimeError(
                 "Scaler has not been fitted. "
-                "Call .fit_scaler(train_df) before building graphs."
+            )
+        
+        if not self._mappers_fitted and self.cat_cols:
+            raise RuntimeError(
+                "Categorical mappers have not been fitted. "
             )
         
         # 1. Numeric features
@@ -114,15 +175,24 @@ class GraphBuilder:
         # 2. Categorical features (multi-hot)
         cat_feats_list = []
         for col in self.cat_cols:
-            cat_col = df[col].fillna('none').astype(str)
-            # Find all unique tokens across all rows for this column
-            all_tokens = set(v for val in cat_col for v in val.split(',') if v)
-            uniques = sorted(list(all_tokens))[:16] # Cap at 16 dimensions
-            mapping = {v: i for i, v in enumerate(uniques)}
+            if col not in self.cat_mappers:
+                warnings.warn(f"Column '{col}' was not in fitted mappers. Skipping.")
+                continue
+
+            mapping = self.cat_mappers[col]
+            num_uniques = len(mapping)
             
-            feat = np.zeros((len(cat_col), len(uniques)), dtype=np.float32)
-            for i, val in enumerate(cat_col):
-                for token in val.split(','):
+            if num_uniques == 0:
+                continue
+
+            # Use the same robust parser as the fit method
+            cat_col = df[col].apply(self._parse_list_cell)
+            feat = np.zeros((len(cat_col), num_uniques), dtype=np.float32)
+            
+            # Iterate over the *list* of tokens, not split-by-comma
+            for i, tokens in enumerate(cat_col):
+                if not isinstance(tokens, list): continue
+                for token in tokens:
                     if token in mapping:
                         feat[i, mapping[token]] = 1.0
             cat_feats_list.append(feat)
@@ -145,6 +215,72 @@ class GraphBuilder:
         ip_feats = np.concatenate(ip_feats_list, axis=1) if ip_feats_list else np.zeros((len(df), 0))
 
         # Combine all features
+        node_feats = np.concatenate([emb, numeric_scaled, cat_feats, ip_feats], axis=1).astype(np.float32)
+        return node_feats
+    
+    def _preprocess_features(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Generates node features for all nodes in the given DataFrame.
+        Assumes scaler and mappers have already been fitted.
+        """
+        if not self._scaler_fitted and self.numeric_cols:
+            raise RuntimeError(
+                "Scaler has not been fitted. "
+                "Call .fit_scaler(train_df) before building graphs."
+            )
+        # --- ADD THIS CHECK ---
+        if not self._mappers_fitted and self.cat_cols:
+            raise RuntimeError(
+                "Categorical mappers have not been fitted. "
+                "Call .fit_categorical_mappers(train_df) before building graphs."
+            )
+            
+        # 1. Numeric features
+        # ... (this part is unchanged)
+        numeric = df[self.numeric_cols].fillna(0).to_numpy(dtype=np.float32)
+        numeric_scaled = self.scaler.transform(numeric) if self.numeric_cols else np.zeros((len(df), 0))
+
+        # --- MODIFY THIS SECTION ---
+        
+        # 2. Categorical features (multi-hot)
+        cat_feats_list = []
+        for col in self.cat_cols:
+            # Get the pre-fitted mapping
+            if col not in self.cat_mappers:
+                warnings.warn(f"Column '{col}' was not in fitted mappers. Skipping.")
+                continue
+
+            mapping = self.cat_mappers[col]
+            num_uniques = len(mapping)
+            
+            if num_uniques == 0:
+                continue
+
+            cat_col = df[col].fillna('none').astype(str)
+            feat = np.zeros((len(cat_col), num_uniques), dtype=np.float32)
+            
+            for i, val in enumerate(cat_col):
+                for token in val.split(','):
+                    if token in mapping: # <--- Use the stored mapping
+                        feat[i, mapping[token]] = 1.0
+            cat_feats_list.append(feat)
+        
+        cat_feats = np.concatenate(cat_feats_list, axis=1) if cat_feats_list else np.zeros((len(df), 0))
+
+        # --- END OF MODIFICATION ---
+
+        # 3. Description embedding
+        # ... (this part is unchanged)
+        if self.desc_col not in df.columns:
+            raise ValueError(f"Description column '{self.desc_col}' not found in DataFrame.")
+        emb = np.stack(df[self.desc_col].values).astype(np.float32)
+
+        # 4. IP features
+        # ... (this part is unchanged)
+        ip_feats_list = []
+        # ... (rest of the function)
+        
+        ip_feats = np.concatenate(ip_feats_list, axis=1) if ip_feats_list else np.zeros((len(df), 0))
         node_feats = np.concatenate([emb, numeric_scaled, cat_feats, ip_feats], axis=1).astype(np.float32)
         return node_feats
 

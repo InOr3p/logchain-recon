@@ -68,6 +68,9 @@ def build_graphs_from_df():
     print("Fitting scaler on training data...")
     builder.fit_scaler(logs_df)
 
+    print("Fitting categorical mappers on training data...")
+    builder.fit_categorical_mappers(logs_df)
+
     # ----------------------------
     # BUILD GRAPHS
     # ----------------------------

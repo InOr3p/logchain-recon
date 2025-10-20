@@ -147,6 +147,13 @@ class WazuhLogClassifier:
         print(f"\nFinal 'type_attack_label' distribution for attacks:\n{attack_logs_in_final_df['type_attack_label'].value_counts()}")
         
         return self
+    
+    def _one_hot_encode_cat_cols(self, col_str, col_name, col_values):
+        for el in col_values:
+            col_name = f'{col_str}{el}'
+            self.df[col_name] = self.df[col_name].apply(
+                lambda x: 1 if isinstance(x, list) and el in x else 0
+            )
 
     def engineer_features(self):
         """
@@ -158,11 +165,6 @@ class WazuhLogClassifier:
         feature_list_path = os.path.join(EXTRACT_DIR, "feature_columns.joblib")
 
         # --- Parse description_vector ---
-        if isinstance(self.df['description_vector'].iloc[0], str):
-            self.df['description_vector'] = self.df['description_vector'].apply(
-                lambda x: np.array(ast.literal_eval(x)) if pd.notna(x) else np.zeros(384)
-            )
-
         embedding_dim = len(self.df['description_vector'].iloc[0])
         embedding_features = np.vstack(self.df['description_vector'].values)
         embedding_df = pd.DataFrame(
@@ -170,59 +172,91 @@ class WazuhLogClassifier:
             columns=[f'emb_{i}' for i in range(embedding_dim)]
         ).astype('float16')
 
-        # --- Parse and flatten rule_groups ---
-        if isinstance(self.df['rule_groups'].iloc[0], str):
-            self.df['rule_groups'] = self.df['rule_groups'].apply(
-                lambda x: ast.literal_eval(x) if pd.notna(x) else []
-            )
+        # --- Robustly parse list-based features ---
+        def _safe_parse_list(x):
+            # Handle NumPy arrays directly
+            if isinstance(x, np.ndarray):
+                return x.tolist()
 
-        # Determine if we already have a saved feature list (for consistent space)
+            # Handle real Python lists
+            if isinstance(x, list):
+                return x
+
+            # Handle None and NaN
+            if x is None or (isinstance(x, float) and np.isnan(x)):
+                return []
+
+            # Handle string representations
+            if isinstance(x, str):
+                try:
+                    parsed = ast.literal_eval(x)
+                    return parsed if isinstance(parsed, list) else []
+                except Exception:
+                    return []
+
+            # Fallback for unexpected types
+            return []
+
+        self.df['rule_groups'] = self.df['rule_groups'].apply(_safe_parse_list)
+        self.df['rule_nist_800_53'] = self.df['rule_nist_800_53'].apply(_safe_parse_list)
+        self.df['rule_gdpr'] = self.df['rule_gdpr'].apply(_safe_parse_list)
+
+        # --- Build or load categorical feature space ---
         if os.path.exists(feature_list_path):
             print("Loading existing feature space...")
             saved_features = joblib.load(feature_list_path)
-            # Extract only the 'group_' features from saved list
+
             saved_groups = [col for col in saved_features if col.startswith('group_')]
+            saved_nist = [col for col in saved_features if col.startswith('nist_')]
+            saved_gdpr = [col for col in saved_features if col.startswith('gdpr_')]
+
             all_groups = [g.replace('group_', '') for g in saved_groups]
+            all_nist_values = [n.replace('nist_', '') for n in saved_nist]
+            all_gdpr_values = [g.replace('gdpr_', '') for g in saved_gdpr]
         else:
             print("Creating new feature space from current dataset...")
-            all_groups = sorted(self.df['rule_groups'].explode().dropna().unique())
 
-        print(f"Total unique rule_groups: {len(all_groups)}")
+            # Filter out empty lists and None before exploding
+            df_non_empty = self.df[
+                (self.df['rule_groups'].apply(lambda x: isinstance(x, list) and len(x) > 0)) |
+                (self.df['rule_nist_800_53'].apply(lambda x: isinstance(x, list) and len(x) > 0)) |
+                (self.df['rule_gdpr'].apply(lambda x: isinstance(x, list) and len(x) > 0))
+            ]
 
-        # Create binary columns for all possible groups
-        for group in all_groups:
-            col_name = f'group_{group}'
-            self.df[col_name] = self.df['rule_groups'].apply(lambda x: 1 if group in x else 0)
+            all_groups = sorted(df_non_empty['rule_groups'].explode().dropna().unique())
+            all_nist_values = sorted(df_non_empty['rule_nist_800_53'].explode().dropna().unique())
+            all_gdpr_values = sorted(df_non_empty['rule_gdpr'].explode().dropna().unique())
 
-        # --- Process NIST and GDPR rules ---
-        for col in ['rule_nist_800_53', 'rule_gdpr']:
-            if isinstance(self.df[col].iloc[0], str):
-                self.df[col] = self.df[col].apply(
-                    lambda x: ast.literal_eval(x) if pd.notna(x) else []
-                )
-            else:
-                self.df[col] = self.df[col].apply(lambda x: x if isinstance(x, list) else [])
+        # --- Print all discovered values ---
+        print(f"\nFound categorical values:")
+        print(f"- rule_groups ({len(all_groups)}): {all_groups}")
+        print(f"- rule_nist_800_53 ({len(all_nist_values)}): {all_nist_values}")
+        print(f"- rule_gdpr ({len(all_gdpr_values)}): {all_gdpr_values}\n")
 
-        self.df['nist_count'] = self.df['rule_nist_800_53'].apply(len)
-        self.df['has_nist'] = (self.df['nist_count'] > 0).astype(int)
-        self.df['gdpr_count'] = self.df['rule_gdpr'].apply(len)
-        self.df['has_gdpr'] = (self.df['gdpr_count'] > 0).astype(int)
+        # --- Create binary columns (one-hot encoding) ---
+        self._one_hot_encode_cat_cols('group_', 'rule_groups', all_groups)
+        self._one_hot_encode_cat_cols('nist_', 'rule_nist_800_53', all_nist_values)
+        self._one_hot_encode_cat_cols('gdpr_', 'rule_gdpr', all_gdpr_values)
+
+        print("Example of parsed row:")
+        print(self.df.iloc[0][['rule_groups', 'rule_nist_800_53', 'rule_gdpr']])
 
         # --- Combine all features ---
         feature_cols = (
-            ['rule_id', 'rule_level', 'rule_firedtimes',
-            'nist_count', 'has_nist', 'gdpr_count', 'has_gdpr'] +
-            [f'group_{g}' for g in all_groups]
+            ['rule_id', 'rule_level', 'rule_firedtimes'] +
+            [f'group_{e}' for e in all_groups] +
+            [f'nist_{e}' for e in all_nist_values] +
+            [f'gdpr_{e}' for e in all_gdpr_values]
         )
 
         # Convert rule_id to integer
         print("Converting 'rule_id' to integer...")
         self.df['rule_id'] = self.df['rule_id'].astype(int)
 
-        # Optimize integer types
+        # --- Optimize integer types ---
         print("\nOptimizing data types to save memory...")
         for col in feature_cols:
-            if self.df[col].dtype == 'int64':
+            if col in self.df.columns and self.df[col].dtype == 'int64':
                 max_val = self.df[col].max()
                 min_val = self.df[col].min()
                 if min_val >= 0:
@@ -240,7 +274,7 @@ class WazuhLogClassifier:
                     elif min_val >= -2147483648 and max_val <= 2147483647:
                         self.df[col] = self.df[col].astype('int32')
 
-        # Combine basic and embedding features
+        # --- Combine with embeddings ---
         X_basic = self.df[feature_cols].copy()
         X_combined = pd.concat(
             [X_basic.reset_index(drop=True), embedding_df.reset_index(drop=True)],
@@ -249,35 +283,37 @@ class WazuhLogClassifier:
 
         y = (self.df['attack_label'] == 'attack').astype(int)
 
-        # --- Align with saved feature space (if exists) ---
+        # --- Align with saved feature space ---
         if os.path.exists(feature_list_path):
             print("Aligning current dataset with saved feature space...")
             expected_features = joblib.load(feature_list_path)
 
-            # Add any missing columns with zeros
             for col in expected_features:
                 if col not in X_combined.columns:
                     X_combined[col] = 0
 
-            # Remove any unexpected extra columns
             X_combined = X_combined[expected_features]
         else:
-            # First run → save feature list
             print(f"Saving feature list with {len(X_combined.columns)} columns.")
             joblib.dump(X_combined.columns.tolist(), feature_list_path)
 
-        # Define categorical features
+        # --- Define categorical features ---
         self.categorical_features = [
             i for i, col in enumerate(X_combined.columns)
-            if col.startswith('group_') or col in ['has_nist', 'has_gdpr']
+            if col.startswith(('group_', 'nist_', 'gdpr_'))
         ]
 
-        print(f"Total features: {X_combined.shape[1]}")
-        print(f"  - Basic + embedding: {len(X_combined.columns)}")
-        print(f"  - Categorical: {len(self.categorical_features)}")
+        print(f"\nFeature engineering summary:")
+        print(f"  - Total features: {X_combined.shape[1]}")
+        print(f"  - Basic: 3")
+        print(f"  - Group features: {len(all_groups)}")
+        print(f"  - NIST features: {len(all_nist_values)}")
+        print(f"  - GDPR features: {len(all_gdpr_values)}")
+        print(f"  - Embedding features: {embedding_dim}")
+        print(f"  - Categorical features: {len(self.categorical_features)}\n")
 
         return X_combined, y
-        
+    
     
     def split_and_scale_data(self, X, y, test_size=0.2):
         """Split data into train/test and scale features."""
@@ -978,65 +1014,76 @@ class WazuhLogClassifier:
         plt.show()
 
     
-    def load_models(self, model_path):
-        """Load all saved models and scaler, then generate predictions for comparison."""
-        print("\nLoading saved models and scaler...")
+    def load_models(self, model_path, models_to_use):
+        print(f"\nLoading saved models {models_to_use} and scaler...")
         
-        # Load scaler
+        # --- Load scaler ---
+        # The scaler is only required for the SimpleNN model.
         scaler_path = os.path.join(model_path, 'standard_scaler.joblib')
-        if os.path.exists(scaler_path):
-            self.scaler = joblib.load(scaler_path)
-            self.X_test_scaled = self.scaler.transform(self.X_test)
-            print("Scaler loaded.")
-        else:
-            print("Warning: Scaler not found, neural network results may be invalid.")
+        scaler_loaded = False
+        
+        if "SimpleNN" in models_to_use:
+            if os.path.exists(scaler_path):
+                self.scaler = joblib.load(scaler_path)
+                self.X_test_scaled = self.scaler.transform(self.X_test)
+                scaler_loaded = True
+                print("Scaler loaded.")
 
-        # Load models
+        # --- Load models ---
         nn_path = os.path.join(model_path, 'SimpleNN.h5')
-        lgb_path = os.path.join(model_path, 'LightGBM.joblib')
-        xgb_path = os.path.join(model_path, 'XGBoost.joblib')
-        cat_path = os.path.join(model_path, 'CatBoost.txt')
+        lgb_path = os.path.join(model_path, 'LightGBM_fd_all_cat.joblib')
+        xgb_path = os.path.join(model_path, 'XGBoost_fd_all_cat.joblib')
+        cat_path = os.path.join(model_path, 'CatBoost_fd_all_cat.txt')
 
-        if os.path.exists(nn_path):
-            nn = load_model(nn_path)
-            self.models['SimpleNN'] = nn
-            print("Neural Network loaded.")
+        # --- SimpleNN ---
+        if "SimpleNN" in models_to_use:
+            if os.path.exists(nn_path):
+                nn = load_model(nn_path)
+                self.models['SimpleNN'] = nn
+                print("Neural Network loaded.")
 
-            # Predict using scaled test set
-            y_pred_proba = nn.predict(self.X_test_scaled).ravel()
-            y_pred = (y_pred_proba > 0.5).astype(int)
-            self.results['SimpleNN'] = {
-                'predictions': y_pred,
-                'probabilities': y_pred_proba,
-                'history': None
-            }
+                if scaler_loaded:
+                    # Predict using scaled test set
+                    y_pred_proba = nn.predict(self.X_test_scaled).ravel()
+                    y_pred = (y_pred_proba > 0.5).astype(int)
+                    self.results['SimpleNN'] = {
+                        'predictions': y_pred,
+                        'probabilities': y_pred_proba,
+                        'history': None
+                    }
 
-        if os.path.exists(lgb_path):
-            lgbm = joblib.load(lgb_path)
-            self.models['LightGBM'] = lgbm
-            print("LightGBM loaded.")
-            y_pred = lgbm.predict(self.X_test)
-            y_pred_proba = lgbm.predict_proba(self.X_test)[:, 1]
-            self.results['LightGBM'] = {'predictions': y_pred, 'probabilities': y_pred_proba}
+        # --- LightGBM ---
+        if "LightGBM" in models_to_use:
+            if os.path.exists(lgb_path):
+                lgbm = joblib.load(lgb_path)
+                self.models['LightGBM'] = lgbm
+                print("LightGBM loaded.")
+                y_pred = lgbm.predict(self.X_test)
+                y_pred_proba = lgbm.predict_proba(self.X_test)[:, 1]
+                self.results['LightGBM'] = {'predictions': y_pred, 'probabilities': y_pred_proba}
 
-        if os.path.exists(xgb_path):
-            xgb_model = joblib.load(xgb_path)
-            self.models['XGBoost'] = xgb_model
-            print("XGBoost loaded.")
-            y_pred = xgb_model.predict(self.X_test)
-            y_pred_proba = xgb_model.predict_proba(self.X_test)[:, 1]
-            self.results['XGBoost'] = {'predictions': y_pred, 'probabilities': y_pred_proba}
+        # --- XGBoost ---
+        if "XGBoost" in models_to_use:
+            if os.path.exists(xgb_path):
+                xgb_model = joblib.load(xgb_path)
+                self.models['XGBoost'] = xgb_model
+                print("XGBoost loaded.")
+                y_pred = xgb_model.predict(self.X_test)
+                y_pred_proba = xgb_model.predict_proba(self.X_test)[:, 1]
+                self.results['XGBoost'] = {'predictions': y_pred, 'probabilities': y_pred_proba}
 
-        if os.path.exists(cat_path):
-            cat_model = CatBoostClassifier()
-            cat_model.load_model(cat_path)
-            self.models['CatBoost'] = cat_model
-            print("CatBoost loaded.")
-            y_pred = cat_model.predict(self.X_test)
-            y_pred_proba = cat_model.predict_proba(self.X_test)[:, 1]
-            self.results['CatBoost'] = {'predictions': y_pred, 'probabilities': y_pred_proba}
+        # --- CatBoost ---
+        if "CatBoost" in models_to_use:
+            if os.path.exists(cat_path):
+                cat_model = CatBoostClassifier()
+                cat_model.load_model(cat_path)
+                self.models['CatBoost'] = cat_model
+                print("CatBoost loaded.")
+                y_pred = cat_model.predict(self.X_test)
+                y_pred_proba = cat_model.predict_proba(self.X_test)[:, 1]
+                self.results['CatBoost'] = {'predictions': y_pred, 'probabilities': y_pred_proba}
 
-        print("\nAll available models loaded and evaluated on test set.")
+        print("\nAll specified, available models loaded and evaluated on test set.")
 
 
     def save_model(self, model_name):
@@ -1096,7 +1143,7 @@ if TRAIN_MODELS:
         classifier.train_neural_network(epochs=10, batch_size=32)
         classifier.save_model("SimpleNN")     
 else:
-    classifier.load_models(MODEL_PATH)
+    classifier.load_models(MODEL_PATH, MODELS_TO_USE)
 
 # --- Plot boosting training curves ---
 # for model_name in MODELS_TO_USE:
