@@ -432,40 +432,44 @@ class GraphBuilder:
         mode: str = "train",
         full_df: Optional[pd.DataFrame] = None
     ):
-        """
-        Builds a single graph, creates its features, and saves it to a .npz file.
+        metadata_df = None 
         
-        Args:
-            df: The DataFrame of logs for *this graph* (a subgraph).
-            graph_id: A unique ID for saving the file.
-            mode: 'train' or 'inference'.
-            full_df: The *entire* dataset, required for negative sampling in 'train' mode.
-        """
         if mode == "train":
             if full_df is None:
                 raise ValueError("full_df is required for 'train' mode negative sampling.")
-            # df is the sub_df, full_df is the pool for negatives
             edge_index, edge_label, graph_df = self._make_edges_training(df, full_df)
             node_feats = self._preprocess_features(graph_df)
-        
+            metadata_df = graph_df
+
         elif mode == "inference":
-            # df is the full graph, no negative sampling
+            # Must reset_index so that node 0 is at row 0
+            df = df.reset_index(drop=True) 
             node_feats = self._preprocess_features(df)
             edge_index = self._make_edges_inference(node_feats)
             edge_label = None
-        
+            metadata_df = df
+
         else:
             raise ValueError("mode must be 'train' or 'inference'")
-
+            
+        # 1. Extract a UNIQUE ID for each NODE (log)
+        if 'id' in metadata_df.columns:
+            log_ids = metadata_df['id'].astype(str).values
+        else:
+            warnings.warn("Metadata: No 'id' or 'uuid' found. Using node index as ID.")
+            log_ids = np.arange(len(metadata_df)).astype(str)
+            
         arrays_dict: Dict[str, np.ndarray] = {
             'node_feats': node_feats, 
-            'edge_index': edge_index
+            'edge_index': edge_index,
+            'log_ids': log_ids,
         }
+        
         if edge_label is not None:
             arrays_dict['edge_label'] = edge_label
 
         out_path = os.path.join(self.output_dir, f"{graph_id}.npz")
-        self.save_npz(out_path, arrays_dict)
+        self.save_npz(out_path, arrays_dict) 
         return out_path
 
     # =========================================================

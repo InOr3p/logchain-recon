@@ -137,7 +137,7 @@ def analyze_graph_distribution(directory: str):
         most_common_count = label_counts.most_common(1)[0][1]
         least_common_count = label_counts.most_common()[-1][1]
         
-        if most_common_count > least_common_count * 10:
+        if most_common_count > least_common_count * 50:
             print("  WARNING: Your dataset is severely imbalanced.")
             print(f"    The largest class has {most_common_count:,} graphs,")
             print(f"    while the smallest has {least_common_count:,} graphs.")
