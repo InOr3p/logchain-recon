@@ -11,3 +11,5 @@
 - *training_classifiers.py*: train logs classifiers (FFNN, XGBoost, LightGBM and CatBoost).
 - *graph_builder.py*: Graph builder's implementation.
 - *build_graph_dataset.py*: generate graphs from dataset logs.
+- *training_edge_predictor.py*: train edge predictor model (GraphSAGE).
+- *attack_seq_recon.py*: evaluate a graph by using the edge predictor, reconstruct the attack sequence from the edge predictor's output graph, summarize it and generate a report via LLM.
