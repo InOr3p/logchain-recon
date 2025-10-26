@@ -1,0 +1,102 @@
+/* Global dark mode theme overrides */
+body {
+  background-color: #121212 !important;
+  color: #e0e0e0 !important;
+  font-family: "Inter", sans-serif;
+}
+
+/* Navbar */
+.navbar {
+  background-color: #0d0d0d !important;
+}
+
+/* Links */
+a,
+.nav-link {
+  color: #b0c4ff !important;
+  text-decoration: none;
+}
+
+a:hover,
+.nav-link:hover {
+  color: #ffffff !important;
+}
+
+/* Cards and containers */
+.card,
+.table,
+.form-control,
+.form-select {
+  background-color: #1e1e1e !important;
+  color: #e0e0e0 !important;
+  border-color: #333 !important;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) {
+  background-color: #222 !important;
+}
+
+/* Buttons */
+.btn {
+  border-radius: 6px !important;
+  font-weight: 500;
+}
+
+.btn-primary {
+  background-color: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #fff !important;
+}
+
+.btn-primary:hover {
+  background-color: #2563eb !important;
+  border-color: #2563eb !important;
+}
+
+/* Alerts */
+.alert {
+  border: none;
+  border-radius: 8px;
+}
+
+.alert-danger {
+  background-color: #b91c1c !important;
+  color: #fff !important;
+}
+
+/* Pagination */
+.pagination .page-link {
+  background-color: #1e1e1e;
+  border-color: #333;
+  color: #b0c4ff;
+}
+
+.pagination .page-item.active .page-link {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+/* Inputs and selects */
+.form-control:focus,
+.form-select:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25) !important;
+  background-color: #1e1e1e !important;
+  color: #fff !important;
+}
+
+/* Spinner */
+.spinner-border {
+  color: #3b82f6 !important;
+}
+
+/* Tables */
+.table-hover tbody tr:hover {
+  background-color: #2b2b2b !important;
+}
+
+/* Footer */
+footer {
+  border-top: 1px solid #222;
+}
