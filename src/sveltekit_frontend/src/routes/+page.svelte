@@ -1,89 +1,26 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import LogTable from "$lib/components/LogTable.svelte";
-  import { getLogs, getAgents } from "$lib/controllers/logs-controller";
-
-  let agents: any[] = [];
-  let selectedAgent = "";
-  let logs: any[] = [];
-  let loading = false;
-  let error = "";
-  let res = null;
-  let logsCount = null;
-
-  // Load agent list on mount
-  onMount(async () => {
-    try {
-      const res = await getAgents();
-      agents = res.agents?.data?.affected_items ?? [];
-    } catch (e: any) {
-      error = e.message ?? "Failed to load agents.";
-      console.error("Error loading agents:", error);
-    }
-  });
-
-  // Fetch logs for selected agent
-  async function fetchLogs() {
-    if (!selectedAgent) return;
-    loading = true;
-    error = "";
-    logs = [];
-
-    try {
-      res = await getLogs(selectedAgent, 100);
-      console.log("Fetched logs:", res);
-      logsCount = res["count"];
-      logs = res["logs"];
-    } catch (e: any) {
-      error = e.message ?? "Failed to fetch logs.";
-      console.error("Error fetching logs:", error);
-    } finally {
-      loading = false;
-    }
-  }
+  import LogsTable from "$lib/components/LogTable.svelte";
 </script>
 
-<!-- Page title -->
-<h2 class="h3 fw-bold mb-4">Logs</h2>
-
-<!-- Agent selection and button -->
-<div class="d-flex align-items-center gap-3 mb-4 flex-wrap">
-  <!-- Agent selector -->
-  <select
-    bind:value={selectedAgent}
-    class="form-select w-auto"
-  >
-    <option value="">Select agent...</option>
-    {#each agents as agent}
-      <option value={agent.id}>{agent.name} ({agent.id})</option>
-    {/each}
-  </select>
-
-  <!-- Load button -->
-  <button
-    on:click={fetchLogs}
-    class="btn btn-primary"
-    disabled={!selectedAgent || loading}
-  >
-    {loading ? "Loading..." : "Load Logs"}
-  </button>
+<div class="card bg-dark mb-4">
+    <div class="card-body">
+        <h2 class="display-5 fw-bold card-title">Welcome to LogChain Recon</h2>
+        <p class="fs-4">
+            This application provides a step-by-step process for analyzing and
+            reconstructing log data.
+        </p>
+        <p class="fs-5">
+            To begin, please load the latest logs from a single agent, then select a step from the sequence bar above.
+        </p>
+        <p class="mb-0">
+            Your results will appear here, and detailed logs will be shown in the
+            panel below.
+        </p>
+    </div>
 </div>
 
-<!-- Error message -->
-{#if error}
-  <div class="alert alert-danger" role="alert">
-    {error}
-  </div>
-{/if}
+<LogsTable />
 
-<!-- Logs display -->
-{#if logs.length > 0}
-  <LogTable {logs} />
-{:else if loading}
-  <div class="d-flex align-items-center gap-2 text-secondary">
-    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
-    <span>Loading logs...</span>
-  </div>
-{:else}
-  <p class="text-muted">No logs loaded.</p>
-{/if}
+
+
+

@@ -1,5 +1,8 @@
 <script lang="ts">
-	import { apiFetch, apiPost } from "$lib/controllers/client-api";
+  import { apiPost } from "$lib/controllers/client-api";
+  import { showAlert } from "$lib/stores/generalStores";
+  // Import the SequenceBar
+  import SequenceBar from "$lib/components/SequenceBar.svelte";
 
   let isRefreshing = false;
 
@@ -8,10 +11,11 @@
     
     try {
       apiPost('/auth/refresh-token', null);
-          
       console.log('Token refreshed successfully');
+      showAlert("Token refreshed successfully", "success", 5000)
     } catch (error) {
       console.error('Failed to refresh token:', error);
+      showAlert("Failed to refresh the token", "danger", 5000)
     } finally {
       isRefreshing = false;
     }
@@ -35,24 +39,20 @@
   </button>
 
   <div class="collapse navbar-collapse" id="navbarNav">
+    
+    <!-- Sequence Bar positioned right after the title -->
+    <div class="sequence-bar-container ms-lg-4">
+      <SequenceBar />
+    </div>
+    
+    <!-- Right-aligned items -->
     <ul class="navbar-nav ms-auto">
-      <!--<li class="nav-item">
-        <a class="nav-link text-light" href="/">Home</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link text-light" href="/agents">Agents</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link text-light" href="/logs">Logs</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link text-light" href="/about">About</a>
-      </li>-->
+      <!-- Empty for now, can add more nav items here if needed -->
     </ul>
     
     <!-- Refresh Token Button -->
     <button
-      class="btn btn-refresh ms-3"
+      class="btn btn-refresh ms-lg-3 my-2 my-lg-0"
       on:click={handleRefreshToken}
       disabled={isRefreshing}
       aria-label="Refresh token"
@@ -80,6 +80,11 @@
 </nav>
 
 <style>
+  .sequence-bar-container {
+    display: flex;
+    align-items: center;
+  }
+
   .btn-refresh {
     display: flex;
     align-items: center;
@@ -91,6 +96,7 @@
     font-size: 0.9rem;
     font-weight: 500;
     transition: all 0.2s ease;
+    flex-shrink: 0;
   }
 
   .btn-refresh:hover:not(:disabled) {
@@ -129,6 +135,25 @@
     
     .btn-refresh {
       padding: 0.5rem;
+    }
+  }
+
+  /* Mobile layout adjustments */
+  @media (max-width: 991.98px) {
+    .sequence-bar-container {
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+      margin-left: 0 !important;
+      width: 100%;
+      justify-content: center;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    .btn-refresh {
+      margin-left: 0 !important;
+      width: fit-content;
+      margin: 0 auto;
     }
   }
 </style>

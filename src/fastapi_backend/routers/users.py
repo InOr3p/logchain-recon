@@ -63,7 +63,7 @@ def refresh_wazuh_token():
     Refresh the Wazuh auths
     """
     try:
-        get_wazuh_token()
+        token_cache["token"] = get_wazuh_token()
         indexer_auth()
         return {"detail": "Token refreshed successfully."}
     except Exception as e:
