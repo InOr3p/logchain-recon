@@ -47,6 +47,14 @@
       showModal = true;
     }
   }
+
+  function getLogDescriptionById(logId: string) {
+    const log = $selectedLogs.find(l => l.id === logId);
+    if (log) {
+      return log["rule_description"]
+    }
+    return "N/A"
+  }
   
   function closeModal() {
     showModal = false;
@@ -126,6 +134,7 @@
           <thead>
             <tr>
               <th>Log ID</th>
+              <th>Description</th>
               <th>Status</th>
               <th>Confidence</th>
               <th style="width: 150px;">Actions</th>
@@ -138,6 +147,7 @@
                 on:mouseleave={() => hoveredRowId = null}
               >
                 <td class="log-id">{pred.id}</td>
+                <td>{getLogDescriptionById(pred.id)}</td>
                 <td>
                   <span class="badge" class:attack={pred.is_attack} class:safe={!pred.is_attack}>
                     {pred.prediction_label}

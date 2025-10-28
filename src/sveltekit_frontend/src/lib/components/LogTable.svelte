@@ -48,6 +48,8 @@
   let error = "";
   let res = null;
   let logsCount = null;
+  let numLogsToFetch = 100; // New variable for number of logs
+  let showExportMenu = false; // Control export dropdown visibility
 
   onMount(async () => {
     // Only fetch agents if the store is empty
@@ -61,6 +63,16 @@
       console.error("Error loading agents:", error);
       showAlert("Error loading agents", "danger", 5000);
     }
+
+    // Close export menu when clicking outside
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.export-dropdown-container')) {
+        showExportMenu = false;
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
   });
 
   async function fetchLogs() {
@@ -72,7 +84,7 @@
     currentPage = 1; // Reset to first page
 
     try {
-      res = await getLogs(selectedAgent, 100);
+      res = await getLogs(selectedAgent, numLogsToFetch);
       console.log("Fetched logs:", res);
       logsCount = res["count"];
       $logs = res["logs"]; 
@@ -83,6 +95,78 @@
     } finally {
       loading = false;
     }
+  }
+
+  function exportLogs(format: 'json' | 'csv') {
+    const logsToExport = $selectedLogs.length > 0 ? $selectedLogs : $logs;
+    
+    if (logsToExport.length === 0) {
+      showAlert("No logs to export", "warning", 3000);
+      return;
+    }
+
+    let content: string;
+    let filename: string;
+    let mimeType: string;
+
+    if (format === 'json') {
+      content = JSON.stringify(logsToExport, null, 2);
+      filename = `logs_export_${new Date().toISOString().split('T')[0]}.json`;
+      mimeType = 'application/json';
+    } else {
+      // CSV format
+      const headers = [
+        'Timestamp',
+        'Description',
+        'Rule ID',
+        'Level',
+        'Firedtimes',
+        'Agent IP',
+        'Source IP',
+        'Groups',
+        'NIST 800-53',
+        'GDPR'
+      ];
+      
+      const csvRows = [headers.join(',')];
+      
+      logsToExport.forEach(log => {
+        const row = [
+          log.timestamp || '',
+          `"${(log.rule_description || '').replace(/"/g, '""')}"`,
+          log.rule_id || '',
+          log.rule_level || '',
+          log.rule_firedtimes || '',
+          log.agent_ip || '',
+          log.data_srcip || '',
+          `"${(log.rule_groups || []).join(', ')}"`,
+          `"${(log.rule_nist_800_53 || []).join(', ')}"`,
+          `"${(log.rule_gdpr || []).join(', ')}"`,
+        ];
+        csvRows.push(row.join(','));
+      });
+      
+      content = csvRows.join('\n');
+      filename = `logs_export_${new Date().toISOString().split('T')[0]}.csv`;
+      mimeType = 'text/csv';
+    }
+
+    // Create download link
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showAlert(
+      `Exported ${logsToExport.length} log${logsToExport.length !== 1 ? 's' : ''} as ${format.toUpperCase()}`,
+      "success",
+      3000
+    );
   }
   
   $: console.log('Selected logs:', $selectedLogs);
@@ -106,6 +190,16 @@
         {/each}
       </select>
 
+      <input
+        type="number"
+        bind:value={numLogsToFetch}
+        min="1"
+        max="10000"
+        class="form-control"
+        style="width: 120px;"
+        placeholder="Logs count"
+      />
+
       <button
         on:click={fetchLogs}
         class="btn btn-primary"
@@ -113,6 +207,44 @@
       >
         {loading ? "Loading..." : "Load Logs"}
       </button>
+
+      {#if $logs.length > 0}
+        <div class="export-dropdown-container">
+          <button
+            type="button"
+            class="btn btn-success"
+            on:click={() => showExportMenu = !showExportMenu}
+          >
+            Export
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 4px;">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          {#if showExportMenu}
+            <div class="export-menu">
+              <button class="export-menu-item" on:click={() => { exportLogs('json'); showExportMenu = false; }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                Export as JSON {$selectedLogs.length > 0 ? `(${$selectedLogs.length} selected)` : `(${$logs.length} all)`}
+              </button>
+              <button class="export-menu-item" on:click={() => { exportLogs('csv'); showExportMenu = false; }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+                Export as CSV {$selectedLogs.length > 0 ? `(${$selectedLogs.length} selected)` : `(${$logs.length} all)`}
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -456,5 +588,48 @@
       font-size: 0.875rem;
       padding: 0.75rem 0.5rem;
     }
+  }
+
+  /* Export Dropdown Styles */
+  .export-dropdown-container {
+    position: relative;
+  }
+
+  .export-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.25rem;
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 6px;
+    min-width: 250px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    overflow: hidden;
+  }
+
+  .export-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    color: #e0e0e0;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-size: 0.9rem;
+  }
+
+  .export-menu-item:hover {
+    background: #2a2a2a;
+  }
+
+  .export-menu-item svg {
+    flex-shrink: 0;
+    opacity: 0.7;
   }
 </style>
