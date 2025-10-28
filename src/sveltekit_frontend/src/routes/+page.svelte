@@ -1,6 +1,7 @@
 <script lang="ts">
-  import LogsTable from "$lib/components/LogTable.svelte";
+    
 </script>
+
 
 <div class="card bg-dark mb-4">
     <div class="card-body">
@@ -18,9 +19,3 @@
         </p>
     </div>
 </div>
-
-<LogsTable />
-
-
-
-

@@ -14,13 +14,6 @@ export function showAlert(message = "", color = 'danger', duration = 5000) {
     }, duration);
 }
 
-
-/**
- * Stores the full list of logs fetched from the API.
- */
 export const logs = writable<any[]>([]);
-
-/**
- * Stores the list of logs currently selected by the user.
- */
 export const selectedLogs = writable<any[]>([]);
+export const agents = writable<any[]>([]);

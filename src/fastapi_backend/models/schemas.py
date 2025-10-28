@@ -16,8 +16,14 @@ class LogItem(BaseModel):
     unix_timestamp: datetime
     rule_description: str
 
-class ClassifiedLog(LogItem):
-    label: str  # "benign" or "attack"
+class Prediction(BaseModel):
+    id: str
+    prediction_label: str
+    prediction_score: float
+    is_attack: bool
+
+class ClassifyResponse(BaseModel):
+    predictions: List[Prediction]
 
 class LogsRequest(BaseModel):
     logs: List[LogItem]

@@ -43,14 +43,14 @@ a:hover,
 }
 
 .btn-primary {
-  background-color: #3b82f6 !important;
-  border-color: #3b82f6 !important;
+  background-color: green !important;
+  border-color: green !important;
   color: #fff !important;
 }
 
 .btn-primary:hover {
-  background-color: #2563eb !important;
-  border-color: #2563eb !important;
+  background-color: darkgreen !important;
+  border-color: darkgreen !important;
 }
 
 /* Alerts */

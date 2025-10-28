@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getLogs, getAgents } from "$lib/controllers/logs-controller";
-  import { logs, selectedLogs, showAlert } from "$lib/stores/generalStores";
+  import { logs, selectedLogs, showAlert, agents } from "$lib/stores/generalStores";
   
   const ITEMS_PER_PAGE = 10;
   let currentPage = 1;
@@ -12,20 +12,18 @@
     currentPage * ITEMS_PER_PAGE
   );
   
-  // Calculate pages to show based on user's request
-  $: pagesToShow = (() => {
-    if (totalPages <= 1) return [];
-
-    const pages = [];
-    if (currentPage > 1) pages.push(currentPage - 1); // Previous
-    pages.push(currentPage); // Current
-    if (currentPage < totalPages) pages.push(currentPage + 1); // Next
-    
-    return pages;
-  })();
+  function changePage(page: number) {
+    if (page >= 1 && page <= totalPages) {
+      currentPage = page;
+    }
+  }
   
-  function changePage(newPage: number) {
-    currentPage = Math.max(1, Math.min(newPage, totalPages));
+  function nextPage() {
+    if (currentPage < totalPages) currentPage++;
+  }
+  
+  function prevPage() {
+    if (currentPage > 1) currentPage--;
   }
   
   function toggleLogSelection(log: any) {
@@ -45,7 +43,6 @@
     $selectedLogs = [];
   }
 
-  let agents: any[] = [];
   let selectedAgent = "";
   let loading = false;
   let error = "";
@@ -53,13 +50,16 @@
   let logsCount = null;
 
   onMount(async () => {
+    // Only fetch agents if the store is empty
+    if ($agents.length > 0) return; 
+
     try {
       const res = await getAgents();
-      agents = res.agents?.data?.affected_items ?? [];
+      $agents = res.agents?.data?.affected_items ?? []; 
     } catch (e: any) {
       error = e.message ?? "Failed to load agents.";
       console.error("Error loading agents:", error);
-      showAlert("Error loading agents", "danger", 5000)
+      showAlert("Error loading agents", "danger", 5000);
     }
   });
 
@@ -68,7 +68,8 @@
     loading = true;
     error = "";
     $logs = []; 
-    $selectedLogs = []; 
+    $selectedLogs = [];
+    currentPage = 1; // Reset to first page
 
     try {
       res = await getLogs(selectedAgent, 100);
@@ -100,7 +101,7 @@
         class="form-select w-auto"
       >
         <option value="">Select agent...</option>
-        {#each agents as agent}
+        {#each $agents as agent}
           <option value={agent.id}>{agent.name} ({agent.id})</option>
         {/each}
       </select>
@@ -226,55 +227,37 @@
         </div>
 
         <!-- Pagination Controls -->
-        <div class="d-flex justify-content-between align-items-center mt-4">
-          <div class="page-info">
-            Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
-            <span class="text-muted ms-2">({$logs.length} total logs)</span>
-          </div>
-          <nav aria-label="Table pagination">
-            <!-- pagination -->
-            <ul class="pagination mb-0">
-              <li class="page-item {currentPage === 1 ? 'disabled' : ''}">
-                <button
-                  class="page-link"
-                  on:click={() => changePage(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  aria-label="Previous page"
-                >
-                  <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                    <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-                  </svg>
-                </button>
-              </li>
-              
-              {#each pagesToShow as pageNum}
-                <li class="page-item {currentPage === pageNum ? 'active' : ''}">
-                  <button
-                    class="page-link"
-                    on:click={() => changePage(pageNum)}
-                    aria-label="Page {pageNum}"
-                    aria-current={currentPage === pageNum ? 'page' : undefined}
+        {#if totalPages > 1}
+          <div class="pagination-wrapper">
+            <button class="page-btn" on:click={prevPage} disabled={currentPage === 1}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            
+            <div class="page-numbers">
+              {#each Array(totalPages) as _, i}
+                {#if i + 1 === 1 || i + 1 === totalPages || (i + 1 >= currentPage - 1 && i + 1 <= currentPage + 1)}
+                  <button 
+                    class="page-num" 
+                    class:active={currentPage === i + 1}
+                    on:click={() => changePage(i + 1)}
                   >
-                    {pageNum}
+                    {i + 1}
                   </button>
-                </li>
+                {:else if i + 1 === currentPage - 2 || i + 1 === currentPage + 2}
+                  <span class="ellipsis">...</span>
+                {/if}
               {/each}
-
-              <li class="page-item {currentPage === totalPages ? 'disabled' : ''}">
-                <button
-                  class="page-link"
-                  on:click={() => changePage(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  aria-label="Next page"
-                >
-                  <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                    <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
-                  </svg>
-                </button>
-              </li>
-            </ul>
-          </nav>
-        </div>
+            </div>
+            
+            <button class="page-btn" on:click={nextPage} disabled={currentPage === totalPages}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
+          </div>
+        {/if}
       </div>
     {:else if loading}
       <div class="d-flex align-items-center gap-2 text-secondary p-3">
@@ -392,46 +375,78 @@
     opacity: 0.5;
     margin: 0 auto;
   }
-  .page-info {
-    color: #9ca3af;
-    font-size: 0.9375rem;
+
+  /* New Pagination Styles */
+  .pagination-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #2a2a2a;
   }
-  .page-info strong {
-    color: #e0e0e0;
-  }
-  .pagination {
-    gap: 0.25rem;
-  }
-  .page-link {
-    background: #1e1e1e;
-    border: 1px solid #333;
-    color: #b0c4ff;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    transition: all 0.15s ease;
+  
+  .page-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 2.5rem;
+    width: 36px;
+    height: 36px;
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: all 0.2s ease;
   }
-  .page-link:hover:not(:disabled) {
+  
+  .page-btn:hover:not(:disabled) {
     background: #2a2a2a;
-    border-color: #3b82f6;
-    color: #3b82f6;
+    border-color: #444;
   }
-  .page-item.active .page-link {
+  
+  .page-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  
+  .page-numbers {
+    display: flex;
+    gap: 0.25rem;
+  }
+  
+  .page-num {
+    min-width: 36px;
+    height: 36px;
+    padding: 0 0.5rem;
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+  }
+  
+  .page-num:hover {
+    background: #2a2a2a;
+    border-color: #444;
+  }
+  
+  .page-num.active {
     background: #3b82f6;
     border-color: #3b82f6;
-    color: #fff;
-    font-weight: 600;
+    color: white;
   }
-  .page-link:disabled {
-    background: #1a1a1a;
-    border-color: #2a2a2a;
-    color: #4b5563;
-    cursor: not-allowed;
-    opacity: 0.5;
+  
+  .ellipsis {
+    display: flex;
+    align-items: center;
+    padding: 0 0.5rem;
+    color: #666;
   }
+
   @media (max-width: 768px) {
     .table thead th {
       font-size: 0.8125rem;
@@ -443,4 +458,3 @@
     }
   }
 </style>
-

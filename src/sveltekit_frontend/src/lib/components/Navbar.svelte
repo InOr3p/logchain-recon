@@ -1,8 +1,9 @@
 <script lang="ts">
   import { apiPost } from "$lib/controllers/client-api";
-  import { showAlert } from "$lib/stores/generalStores";
+  import { agents, showAlert } from "$lib/stores/generalStores";
   // Import the SequenceBar
   import SequenceBar from "$lib/components/SequenceBar.svelte";
+	import { getAgents } from "$lib/controllers/logs-controller";
 
   let isRefreshing = false;
 
@@ -13,6 +14,12 @@
       apiPost('/auth/refresh-token', null);
       console.log('Token refreshed successfully');
       showAlert("Token refreshed successfully", "success", 5000)
+      try {
+        const res = await getAgents();
+        $agents = res.agents?.data?.affected_items ?? [];
+      } catch (e: any) {
+        showAlert("Error loading agents", "danger", 5000)
+      }
     } catch (error) {
       console.error('Failed to refresh token:', error);
       showAlert("Failed to refresh the token", "danger", 5000)

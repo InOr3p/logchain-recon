@@ -1,45 +1,62 @@
-from fastapi import APIRouter, HTTPException, Query
-from fastapi_backend.models.schemas import LogsRequest
-from fastapi_backend.services.classifier_service import classify_logs
-from fastapi_backend.services.logs_service import get_agent_logs, get_wazuh_agents
+from fastapi import APIRouter, HTTPException, Request
+from typing import List
+from fastapi_backend.models.schemas import ClassifyResponse, LogItem, Prediction
+from fastapi_backend.services.classifier_service import ClassifierService
 
-router = APIRouter(prefix="/agents", tags=["Wazuh Logs"])
 
-@router.get("/")
-def get_agents(limit: int = Query(2000, le=5000)):
+router = APIRouter(prefix="/logs", tags=["Wazuh Logs"])
+
+@router.post("/classify", response_model=ClassifyResponse)
+async def classify_logs(logs: List[LogItem], request: Request):
     """
-    Retrieve all registered agents from Wazuh.
+    Receives a list of logs, preprocesses them, and returns predictions.
     """
-    try:
-        agents = get_wazuh_agents(limit)
-        if not agents:
-            raise HTTPException(status_code=404, detail="No agents found.")
-        return {"count": len(agents), "agents": agents}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
     
+    # 1. Get the service instance from the app state
+    try:
+        service: ClassifierService = request.app.state.classifier_service
+    except AttributeError:
+        raise HTTPException(
+            status_code=503, # Service Unavailable
+            detail="Classifier service is not loaded. Please check server logs."
+        )
 
-@router.get("/{agent_id}/logs/latest")
-def get_latest_agent_logs(agent_id: str, limit: int = Query(50, le=200)):
-    """
-    Retrieve the latest logs for a specific Wazuh agent directly from the Wazuh API.
-    """
+    if not logs:
+        return ClassifyResponse(predictions=[])
+
     try:
-        logs = get_agent_logs(agent_id, limit)
-        if not logs:
-            raise HTTPException(status_code=404, detail=f"No logs found for agent {agent_id}")
-        return {
-            "agent_id": agent_id,
-            "count": len(logs),
-            "logs": logs
-        }
+        # 2. Preprocess the data
+        df_features = service.preprocess(logs)
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error during preprocessing: {e}")
+        import traceback
+        traceback.print_exc() # Print full stack trace
+        raise HTTPException(
+            status_code=400, # Bad Request
+            detail=f"Data preprocessing error: {e}. Check log format."
+        )
+
+    # 3. Run Inference
+    pred_scores = service.predict(df_features)
+
+    # 4. Format the response
+    threshold = 0.5  # Your decision threshold
+    label_map = {0: "Benign", 1: "Attack"}
     
-@router.post("/classify")
-def classify_logs_endpoint(request: LogsRequest):
-    try:
-        labeled = classify_logs(request.logs)
-        return {"classified_logs": [log.dict() for log in labeled]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    response_predictions = []
+    for i, log in enumerate(logs):
+        score = float(pred_scores[i])
+        is_attack = score >= threshold
+        label_int = 1 if is_attack else 0
+        
+        response_predictions.append(
+            Prediction(
+                id=log.id,
+                prediction_label=label_map[label_int],
+                prediction_score=score,
+                is_attack=is_attack
+            )
+        )
+        
+    return ClassifyResponse(predictions=response_predictions)

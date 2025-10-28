@@ -3,9 +3,9 @@
   
   export let steps = [
     { name: "Classify", path: "/classify" },
-    { name: "Build graph", path: "/build" },
+    { name: "Build graph", path: "/build-graph" },
     { name: "Predict", path: "/predict" },
-    { name: "Generate report", path: "/generate" },
+    { name: "Generate report", path: "/generate-report" },
   ];
 
 // ... existing script ...
@@ -75,9 +75,7 @@
     width: 100%; /* Ensure it fills its container */
   }
 
-  /* This is the <li> holding the link */
   .step-item {
-    /* No flex properties needed here */
     position: relative;
   }
 
@@ -104,28 +102,31 @@
 
   .step-link:hover .step-circle {
     transform: scale(1.1);
-    border-color: #3b82f6;
+    border-color: lightgreen; /* #3b82f6; */
   }
 
   .step-link:hover .step-name {
     color: #ffffff;
   }
 
+  .step-link:hover .step-number {
+    color: #ffffff;
+  }
+
   /* Step Circle */
   .step-circle {
-    /* CHANGED: Increased size */
     width: 38px;
     height: 38px;
     border-radius: 50%;
-    border: 2px solid #4a5568;
-    background-color: #1e1e1e;
+    border: 2px solid darkgreen;/* #4a5568; */
+    background-color: green; /* #1e1e1e; */
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.3s ease;
     font-weight: 600;
     font-size: 0.95rem; /* Adjusted font size for larger circle */
-    color: #9ca3af;
+    color: #d5d5d4;
     flex-shrink: 0;
   }
 
@@ -142,8 +143,8 @@
 
   /* Active Step */
   .step-link.active .step-circle {
-    background-color: #3b82f6;
-    border-color: #3b82f6;
+    background-color: green; /* #3b82f6; */
+    border-color: darkgreen; /* #3b82f6; */
     color: #ffffff;
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
   }
@@ -174,7 +175,7 @@
     min-width: 40px; 
     
     height: 2px;
-    background-color: #4a5568;
+    background-color: green; /* #4a5568; */
     
     /* (38px / 2) - (2px / 2) = 18px
       Increased by 2px to lower the line.
@@ -199,7 +200,6 @@
     }
 
     .step-circle {
-      /* CHANGED: Adjusted for smaller screens */
       width: 32px;
       height: 32px;
       font-size: 0.85rem;
