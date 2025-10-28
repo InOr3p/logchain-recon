@@ -1,4 +1,6 @@
+<!-- ClassificationPanel.svelte -->
 <script lang="ts">
+	import LogDetailModal from '$lib/components/LogDetailModal.svelte';
   import { classifyLogs } from '$lib/controllers/logs-controller';
   import type { LogItem, Prediction } from '$lib/schema/models';
   import { selectedLogs } from '$lib/stores/generalStores';
@@ -6,6 +8,11 @@
   let predictions: Prediction[] = [];
   let isLoading = false;
   let errorMessage = '';
+  let hoveredRowId: string | null = null;
+  
+  // Modal state
+  let showModal = false;
+  let selectedLog: LogItem | null = null;
   
   // Pagination
   let currentPage = 1;
@@ -30,6 +37,20 @@
   
   function prevPage() {
     if (currentPage > 1) currentPage--;
+  }
+  
+  function viewCompleteLog(logId: string) {
+    // Find the log from selectedLogs
+    const log = $selectedLogs.find(l => l.id === logId);
+    if (log) {
+      selectedLog = log;
+      showModal = true;
+    }
+  }
+  
+  function closeModal() {
+    showModal = false;
+    selectedLog = null;
   }
   
   async function handleClassify() {
@@ -95,7 +116,7 @@
         <div class="stats">
           <span class="results-count">{predictions.length} logs analyzed</span>
           <span class="attack-count" class:has-attacks={attackCount > 0}>
-            {attackCount} attack log{attackCount !== 1 ? 's' : ''} detected
+            {attackCount} attack{attackCount !== 1 ? 's' : ''} detected
           </span>
         </div>
       </div>
@@ -107,11 +128,15 @@
               <th>Log ID</th>
               <th>Status</th>
               <th>Confidence</th>
+              <th style="width: 150px;">Actions</th>
             </tr>
           </thead>
           <tbody>
             {#each paginatedPredictions as pred}
-              <tr>
+              <tr
+                on:mouseenter={() => hoveredRowId = pred.id}
+                on:mouseleave={() => hoveredRowId = null}
+              >
                 <td class="log-id">{pred.id}</td>
                 <td>
                   <span class="badge" class:attack={pred.is_attack} class:safe={!pred.is_attack}>
@@ -129,6 +154,19 @@
                     </div>
                     <span class="confidence-text">{(pred.prediction_score * 100).toFixed(1)}%</span>
                   </div>
+                </td>
+                <td>
+                  <button 
+                    class="view-log-btn"
+                    class:visible={hoveredRowId === pred.id}
+                    on:click={() => viewCompleteLog(pred.id)}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    View Log
+                  </button>
                 </td>
               </tr>
             {/each}
@@ -170,6 +208,13 @@
     </div>
   {/if}
 </div>
+
+<!-- Use the modal component -->
+<LogDetailModal 
+  bind:showModal 
+  log={selectedLog} 
+  onClose={closeModal} 
+/>
 
 <style>
   .classification-panel {
@@ -323,6 +368,34 @@
     font-weight: 600;
     color: #d0d0d0;
     font-size: 0.875rem;
+  }
+  
+  .view-log-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    background: #2a2a2a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #b0c4ff;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  
+  .view-log-btn.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  
+  .view-log-btn:hover {
+    background: #333;
+    border-color: #3b82f6;
+    color: #3b82f6;
   }
   
   .pagination {
