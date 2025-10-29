@@ -281,8 +281,8 @@ if __name__ == "__main__":
     MODEL_PATH = "models/LightGBM_fd_all_cat.joblib"
     FEATURE_COLUMNS_PATH = os.path.join(EXTRACT_DIR, "feature_columns.joblib")
     LOG_FILE = os.path.join(EXTRACT_DIR, "logs_export_2025-10-29.csv")
-    OUTPUT_FILE = "evaluation_results.csv"
-    
+    OUTPUT_FILE = os.path.join(EXTRACT_DIR, "evaluation_results.csv")
+        
     # Check if files exist
     if not os.path.exists(MODEL_PATH):
         print(f"Error: Model file not found at {MODEL_PATH}")
@@ -309,7 +309,7 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("SAMPLE PREDICTIONS (First 10 logs)")
     print("="*60)
-    sample_cols = ['timestamp', 'rule_id', 'rule_description', 'rule_level', 
+    sample_cols = ['@timestamp', 'rule_id', 'rule_description', 'rule_level', 
                    'prediction', 'confidence_pct']
     sample_cols = [col for col in sample_cols if col in results_df.columns]
     print(results_df[sample_cols].head(10).to_string(index=False))
