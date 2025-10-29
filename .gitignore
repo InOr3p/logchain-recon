@@ -227,3 +227,4 @@ src/*.log
 src/catboost_info/
 src/graphs_dataset/
 src/graphs_dataset_balanced/
+/src/fastapi_backend/graph_cache/

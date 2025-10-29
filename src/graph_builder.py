@@ -1,5 +1,6 @@
 import ast
 from collections import Counter
+import json
 import os
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from datetime import timedelta
 import hashlib
 from typing import List, Dict, Optional, Set, Tuple
 import warnings
+import joblib
 
 class GraphBuilder:
     """
@@ -217,72 +219,6 @@ class GraphBuilder:
         # Combine all features
         node_feats = np.concatenate([emb, numeric_scaled, cat_feats, ip_feats], axis=1).astype(np.float32)
         return node_feats
-    
-    def _preprocess_features(self, df: pd.DataFrame) -> np.ndarray:
-        """
-        Generates node features for all nodes in the given DataFrame.
-        Assumes scaler and mappers have already been fitted.
-        """
-        if not self._scaler_fitted and self.numeric_cols:
-            raise RuntimeError(
-                "Scaler has not been fitted. "
-                "Call .fit_scaler(train_df) before building graphs."
-            )
-        # --- ADD THIS CHECK ---
-        if not self._mappers_fitted and self.cat_cols:
-            raise RuntimeError(
-                "Categorical mappers have not been fitted. "
-                "Call .fit_categorical_mappers(train_df) before building graphs."
-            )
-            
-        # 1. Numeric features
-        # ... (this part is unchanged)
-        numeric = df[self.numeric_cols].fillna(0).to_numpy(dtype=np.float32)
-        numeric_scaled = self.scaler.transform(numeric) if self.numeric_cols else np.zeros((len(df), 0))
-
-        # --- MODIFY THIS SECTION ---
-        
-        # 2. Categorical features (multi-hot)
-        cat_feats_list = []
-        for col in self.cat_cols:
-            # Get the pre-fitted mapping
-            if col not in self.cat_mappers:
-                warnings.warn(f"Column '{col}' was not in fitted mappers. Skipping.")
-                continue
-
-            mapping = self.cat_mappers[col]
-            num_uniques = len(mapping)
-            
-            if num_uniques == 0:
-                continue
-
-            cat_col = df[col].fillna('none').astype(str)
-            feat = np.zeros((len(cat_col), num_uniques), dtype=np.float32)
-            
-            for i, val in enumerate(cat_col):
-                for token in val.split(','):
-                    if token in mapping: # <--- Use the stored mapping
-                        feat[i, mapping[token]] = 1.0
-            cat_feats_list.append(feat)
-        
-        cat_feats = np.concatenate(cat_feats_list, axis=1) if cat_feats_list else np.zeros((len(df), 0))
-
-        # --- END OF MODIFICATION ---
-
-        # 3. Description embedding
-        # ... (this part is unchanged)
-        if self.desc_col not in df.columns:
-            raise ValueError(f"Description column '{self.desc_col}' not found in DataFrame.")
-        emb = np.stack(df[self.desc_col].values).astype(np.float32)
-
-        # 4. IP features
-        # ... (this part is unchanged)
-        ip_feats_list = []
-        # ... (rest of the function)
-        
-        ip_feats = np.concatenate(ip_feats_list, axis=1) if ip_feats_list else np.zeros((len(df), 0))
-        node_feats = np.concatenate([emb, numeric_scaled, cat_feats, ip_feats], axis=1).astype(np.float32)
-        return node_feats
 
     # =========================================================
     # EDGE CREATION
@@ -407,8 +343,7 @@ class GraphBuilder:
             return np.empty((2, 0), dtype=np.int64)
 
         # Get temporal edges (undirected)
-        # We pass labels=None for inference mode
-        temporal_edges = self._create_temporal_edges(num_nodes, labels=None)
+        temporal_edges = self._create_temporal_edges(num_nodes)
         
         # Get K-NN edges (undirected)
         knn_edges = self._create_knn_edges(node_feats)
@@ -687,3 +622,20 @@ class GraphBuilder:
             print(f"Saved graph to {out_path}")
         except Exception as e:
             print(f"Error saving graph to {out_path}: {e}")
+
+    def save_state(self, output_dir: str):
+        """Saves the fitted scaler and mappers to disk."""
+        if not self._scaler_fitted:
+            warnings.warn("Scaler is not fitted. Nothing to save.")
+        else:
+            scaler_path = os.path.join(output_dir, "graph_builder_scaler.joblib")
+            joblib.dump(self.scaler, scaler_path)
+            print(f"Saved scaler to {scaler_path}")
+            
+        if not self._mappers_fitted:
+            warnings.warn("Mappers are not fitted. Nothing to save.")
+        else:
+            mappers_path = os.path.join(output_dir, "graph_builder_cat_mappers.json")
+            with open(mappers_path, 'w') as f:
+                json.dump(self.cat_mappers, f)
+            print(f"Saved mappers to {mappers_path}")

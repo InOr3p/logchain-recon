@@ -45,3 +45,26 @@ export interface AgentsResponse {
         };
   };
 }
+
+/**
+ * Response type for the build graphs endpoint
+ */
+export interface BuildGraphsResponse {
+  message: string;
+  graph_files: string[];
+}
+
+
+/**
+ * Graph data structure returned when fetching a specific graph
+ */
+export interface GraphData {
+  filename: string;
+  agent_ip: string;
+  window_num: string;
+  num_nodes: number;
+  num_edges: number;
+  node_feats: number[][];
+  edge_index: number[][];
+  log_ids: string[];
+}
