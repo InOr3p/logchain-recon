@@ -95,3 +95,9 @@ a:hover,
 .table-hover tbody tr:hover {
   background-color: #2b2b2b !important;
 }
+
+.subtitle {
+    font-size: 1.1rem;
+    color: #b0c4ff;
+    margin: 0;
+}

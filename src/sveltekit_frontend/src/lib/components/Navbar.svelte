@@ -11,7 +11,8 @@
     isRefreshing = true;
     
     try {
-      apiPost('/auth/refresh-token', null);
+      const res = await apiPost('/auth/refresh-token', null);
+      console.log("res: ", res)
       console.log('Token refreshed successfully');
       showAlert("Token refreshed successfully", "success", 5000)
       try {

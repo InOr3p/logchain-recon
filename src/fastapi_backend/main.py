@@ -101,13 +101,13 @@ def load_all_models():
             cat_cols=['rule_groups', 'rule_nist_800_53', 'rule_gdpr'],
             ip_cols=['agent_ip', 'data_srcip'],
             desc_col='description_vector', # This must match what you use
-            min_nodes_per_graph=10,
-            max_nodes_per_graph=1000,
+            min_nodes_per_graph=5,
+            max_nodes_per_graph=20,
             candidate_edge_topk=10,
             positive_neighbor_window=5,
             hash_dim_ip=16,
-            window_size=500,
-            stride=200,
+            window_size=50,
+            stride=25,
         )
         
         # Load the pre-fitted scaler and mappers

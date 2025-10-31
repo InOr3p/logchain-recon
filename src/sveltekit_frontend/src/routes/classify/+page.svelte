@@ -3,7 +3,7 @@
 	import LogDetailModal from '$lib/components/LogDetailModal.svelte';
   import { classifyLogs } from '$lib/controllers/logs-controller';
   import type { LogItem, Prediction } from '$lib/schema/models';
-  import { selectedLogs } from '$lib/stores/generalStores';
+  import { selectedLogs, showAlert } from '$lib/stores/generalStores';
   
   let predictions: Prediction[] = [];
   let isLoading = false;
@@ -25,6 +25,11 @@
   );
   $: attackCount = predictions.filter(p => p.is_attack).length;
   
+  // Check if a log is currently selected
+  $: isLogSelected = (logId: string) => {
+    return $selectedLogs.some(log => log.id === logId);
+  };
+  
   function goToPage(page: number) {
     if (page >= 1 && page <= totalPages) {
       currentPage = page;
@@ -39,9 +44,14 @@
     if (currentPage > 1) currentPage--;
   }
   
-  function viewCompleteLog(logId: string) {
-    // Find the log from selectedLogs
-    const log = $selectedLogs.find(l => l.id === logId);
+  function viewCompleteLog(logId: string, event?: MouseEvent) {
+    // Stop propagation to prevent row click
+    if (event) {
+      event.stopPropagation();
+    }
+    
+    // Find the log from our classified logs list
+    const log = classifiedLogs.find(l => l.id === logId);
     if (log) {
       selectedLog = log;
       showModal = true;
@@ -49,7 +59,7 @@
   }
 
   function getLogDescriptionById(logId: string) {
-    const log = $selectedLogs.find(l => l.id === logId);
+    const log = classifiedLogs.find(l => l.id === logId);
     if (log) {
       return log["rule_description"]
     }
@@ -61,9 +71,52 @@
     selectedLog = null;
   }
   
+  // Store all classified logs separately so we can reference them
+  let classifiedLogs: LogItem[] = [];
+  
+  function toggleLogSelection(logId: string, event: MouseEvent) {
+    // Prevent row click when clicking the view button or any child element of it
+    const target = event.target as HTMLElement;
+    if (target.closest('.view-log-btn') || target.closest('.actions-cell')) {
+      return;
+    }
+    
+    // Find the log from our classified logs list
+    const log = classifiedLogs.find(l => l.id === logId);
+    if (!log) return;
+    
+    const isCurrentlySelected = isLogSelected(logId);
+    
+    if (isCurrentlySelected) {
+      // Remove from selection
+      selectedLogs.update(logs => logs.filter(l => l.id !== logId));
+    } else {
+      // Add to selection
+      selectedLogs.update(logs => [...logs, log]);
+    }
+  }
+  
+  function selectAllAttacks() {
+    // Get all attack predictions
+    const attackPredictions = predictions.filter(p => p.is_attack);
+    
+    // Get the corresponding logs from our classified logs
+    const attackLogs = attackPredictions
+      .map(pred => classifiedLogs.find(log => log.id === pred.id))
+      .filter((log): log is LogItem => log !== undefined);
+    
+    // Update selectedLogs with unique logs
+    selectedLogs.update(logs => {
+      const existingIds = new Set(logs.map(l => l.id));
+      const newLogs = attackLogs.filter(log => !existingIds.has(log.id));
+      return [...logs, ...newLogs];
+    });
+  }
+  
   async function handleClassify() {
     if ($selectedLogs.length === 0) {
       errorMessage = 'Please select one or more logs to classify.';
+      showAlert(errorMessage, "danger", 5000);
       return;
     }
     
@@ -88,6 +141,9 @@
         rule_description: log.rule_description,
       }));
       
+      // Store the classified logs for later reference
+      classifiedLogs = logsToClassify;
+      
       const results = await classifyLogs(logsToClassify);
       predictions = results;
       
@@ -97,14 +153,22 @@
       } else {
         errorMessage = 'An unknown error occurred.';
       }
+      showAlert(errorMessage, "danger", 5000);
     } finally {
       isLoading = false;
+      $selectedLogs = [];
     }
   }
 </script>
 
 <div class="classification-panel">
-  <button class="btn btn-primary" on:click={handleClassify} disabled={isLoading}>
+  <!-- Header -->
+  <div class="header">
+    <h1>Classify logs</h1>
+    <p class="subtitle">Classify logs as <code>benign</code> or <code>attack</code> by using LightGBM model</p>
+  </div>
+
+  <button class="btn btn-primary mt-4" on:click={handleClassify} disabled={isLoading}>
     {#if isLoading}
       <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
       Classifying...
@@ -112,10 +176,6 @@
       Classify Selected Logs ({$selectedLogs.length})
     {/if}
   </button>
-  
-  {#if errorMessage}
-    <div class="alert alert-danger mt-3">{errorMessage}</div>
-  {/if}
   
   {#if predictions.length > 0}
     <div class="results">
@@ -126,6 +186,14 @@
           <span class="attack-count" class:has-attacks={attackCount > 0}>
             {attackCount} attack{attackCount !== 1 ? 's' : ''} detected
           </span>
+          {#if attackCount > 0}
+            <button class="select-attacks-btn" on:click={selectAllAttacks}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              Select All Attacks
+            </button>
+          {/if}
         </div>
       </div>
       
@@ -133,6 +201,7 @@
         <table>
           <thead>
             <tr>
+              <th style="width: 40px;"></th>
               <th>Log ID</th>
               <th>Description</th>
               <th>Status</th>
@@ -143,9 +212,20 @@
           <tbody>
             {#each paginatedPredictions as pred}
               <tr
+                class:selected={isLogSelected(pred.id)}
                 on:mouseenter={() => hoveredRowId = pred.id}
                 on:mouseleave={() => hoveredRowId = null}
+                on:click={(e) => toggleLogSelection(pred.id, e)}
               >
+                <td class="checkbox-cell">
+                  <div class="custom-checkbox" class:checked={isLogSelected(pred.id)}>
+                    {#if isLogSelected(pred.id)}
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    {/if}
+                  </div>
+                </td>
                 <td class="log-id">{pred.id}</td>
                 <td>{getLogDescriptionById(pred.id)}</td>
                 <td>
@@ -165,11 +245,11 @@
                     <span class="confidence-text">{(pred.prediction_score * 100).toFixed(1)}%</span>
                   </div>
                 </td>
-                <td>
+                <td class="actions-cell">
                   <button 
                     class="view-log-btn"
                     class:visible={hoveredRowId === pred.id}
-                    on:click={() => viewCompleteLog(pred.id)}
+                    on:click={(e) => viewCompleteLog(pred.id, e)}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -278,6 +358,26 @@
     border-color: rgba(239, 68, 68, 0.3);
   }
   
+  .select-attacks-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    color: #fca5a5;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .select-attacks-btn:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.5);
+  }
+  
   .table-container {
     overflow-x: auto;
     border-radius: 8px;
@@ -307,10 +407,20 @@
   tbody tr {
     border-bottom: 1px solid #2a2a2a;
     transition: background 0.2s ease;
+    cursor: pointer;
   }
   
   tbody tr:hover {
     background: #252525;
+  }
+  
+  tbody tr.selected {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+  }
+  
+  tbody tr.selected:hover {
+    background: rgba(59, 130, 246, 0.15);
   }
   
   tbody tr:last-child {
@@ -320,6 +430,36 @@
   td {
     padding: 1rem;
     font-size: 0.9rem;
+  }
+  
+  .checkbox-cell {
+    padding: 1rem 0.5rem 1rem 1rem;
+  }
+  
+  .custom-checkbox {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #444;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    background: #1a1a1a;
+  }
+  
+  .custom-checkbox.checked {
+    background: #3b82f6;
+    border-color: #3b82f6;
+  }
+  
+  .custom-checkbox svg {
+    color: white;
+  }
+  
+  tbody tr:hover .custom-checkbox:not(.checked) {
+    border-color: #666;
+    background: #252525;
   }
   
   .log-id {
@@ -476,5 +616,12 @@
     align-items: center;
     padding: 0 0.5rem;
     color: #666;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    margin: 0 0 0.5rem 0;
   }
 </style>

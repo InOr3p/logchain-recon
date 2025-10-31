@@ -308,21 +308,18 @@ class GraphBuilder:
         df = df.copy()
         df[self.desc_col] = list(description_vectors)
         paths = []
-
-        grouped = df.groupby("agent_ip")
-        print(f"Building inference graphs for {len(grouped)} agents...")
-        for agent, group in tqdm(grouped, desc="Building inference graphs"):
+        agent = df["agent_ip"].iloc[0]
             
-            subgraphs = self._split_sliding_windows(group)
+        subgraphs = self._split_sliding_windows(df)
+        
+        for i, sg in enumerate(subgraphs):
+            if len(sg) < 2: continue
             
-            for i, sg in enumerate(subgraphs):
-                if len(sg) < 2: continue
-                
-                graph_id = f"inference_{agent}_win{i}"
-                paths.append(self.build_graph(
-                    sg.reset_index(drop=True), 
-                    graph_id,
-                ))
+            graph_id = f"inference_{agent}_win{i}"
+            paths.append(self.build_graph(
+                sg.reset_index(drop=True), 
+                graph_id,
+            ))
 
         print(f"Built {len(paths)} graphs in total.")
         return paths
