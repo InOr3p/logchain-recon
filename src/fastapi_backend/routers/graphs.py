@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 
-from fastapi_backend.models.schemas import BuildGraphsResponse, LogsRequest
+from fastapi_backend.models.schemas import BuildGraphsResponse, GraphPredictRequest, GraphPredictResponse, LogsRequest
 
 
 router = APIRouter(prefix="/graphs", tags=["Graphs"])
@@ -93,3 +93,125 @@ async def get_graph_data(path: str = Query(..., description="Path to the .npz gr
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading graph file: {str(e)}")
+    
+
+
+# ==================== Endpoint ====================
+
+@router.post("/predict", response_model=GraphPredictResponse)
+async def predict_graph(
+    request_data: GraphPredictRequest,
+    request: Request
+):
+    """
+    Predict attack edges in a graph using provided logs.
+    
+    This endpoint:
+    1. Loads a graph from the specified path (relative to graph_cache)
+    2. Uses the provided logs as metadata
+    3. Runs edge prediction using the EdgePredictorService
+    4. Returns attack graph with nodes and edges
+    
+    Args:
+        request_data: GraphPredictRequest containing graph path, logs, and parameters
+        request: FastAPI Request object to access app.state services
+        
+    Returns:
+        GraphPredictResponse with prediction results
+        
+    Example:
+        POST /graphs/predict
+        {
+            "graph_path": "graph_chunk_0.npz",
+            "logs": [
+                {
+                    "id": "log_001",
+                    "timestamp": "2024-01-15T10:30:00",
+                    "rule_description": "SSH authentication failed",
+                    "rule_level": 5,
+                    ...
+                }
+            ],
+            "threshold": 0.9,
+            "summarize": true
+        }
+    """
+    try:
+        # Get the EdgePredictorService from app.state
+        edge_predictor_service = request.app.state.edge_predictor_service
+        
+        graph_full_path = os.path.join(request_data.graph_path)
+        
+        # Load graph data
+        if not os.path.exists(graph_full_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Graph file not found: {request_data.graph_path}"
+            )
+        
+        loaded_data = np.load(graph_full_path, allow_pickle=True)
+        
+        # Validate graph structure
+        if 'node_feats' not in loaded_data or 'edge_index' not in loaded_data or 'log_ids' not in loaded_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Graph file must contain 'node_feats', 'edge_index', and 'log_ids'"
+            )
+        
+        node_features = loaded_data['node_feats']
+        edge_index = loaded_data['edge_index']
+        log_ids = loaded_data['log_ids']
+        
+        # Convert logs to DataFrame
+        if not request_data.logs:
+            raise HTTPException(
+                status_code=400,
+                detail="Logs list cannot be empty"
+            )
+        
+        logs_df = pd.DataFrame([log.dict() for log in request_data.logs])
+        
+        # Ensure id column exists and is string type
+        if 'id' not in logs_df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail="All logs must have an 'id' field"
+            )
+        
+        logs_df['id'] = logs_df['id'].astype(str)
+        logs_df = logs_df.set_index('id')
+        
+        # Convert timestamp if present
+        if '@timestamp' in logs_df.columns:
+            logs_df['@timestamp'] = pd.to_datetime(logs_df['@timestamp'], errors='coerce')
+        elif 'timestamp' in logs_df.columns:
+            logs_df['@timestamp'] = pd.to_datetime(logs_df['timestamp'], errors='coerce')
+        
+        # Run prediction
+        result = edge_predictor_service.predict(
+            node_features=node_features,
+            edge_index=edge_index,
+            log_ids=log_ids,
+            logs_df=logs_df,
+            threshold=request_data.threshold,
+            summarize=request_data.summarize
+        )
+        
+        # Add metadata
+        result['metadata'] = {
+            'graph_path': request_data.graph_path,
+            'num_nodes': len(node_features),
+            'num_edges': edge_index.shape[1],
+            'num_features': node_features.shape[1],
+            'num_logs_provided': len(request_data.logs)
+        }
+        
+        return GraphPredictResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction error: {str(e)}"
+        )

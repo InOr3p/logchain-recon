@@ -6,6 +6,7 @@ from sentence_transformers import SentenceTransformer
 from fastapi_backend.routers import agents, graphs, logs, users
 from fastapi_backend.services.classifier_service import ClassifierService
 from fastapi_backend.services.graph_builder_service import GraphBuilder
+from fastapi_backend.services.edge_predictor_service import EdgePredictorService
 
 app = FastAPI(title="Logchain Recon API")
 
@@ -36,26 +37,30 @@ AI_MODELS_DIR = os.path.join("fastapi_backend", "AI_models")
 LIGHTGBM_PATH = os.path.join(AI_MODELS_DIR, "LightGBM_fd_all_cat.joblib")
 FEATURE_LIST_PATH = os.path.join(AI_MODELS_DIR, "feature_columns.joblib")
 
+# Paths for EdgePredictorService
+EDGE_PREDICTOR_MODEL_PATH = os.path.join(AI_MODELS_DIR, "gnn_edge_predictor_10epochs.pth")
+EDGE_PREDICTOR_HIDDEN_CHANNELS = 128
+
 # Directory where the builder will save temporary .npz graph files
 GRAPH_CACHE_DIR = os.path.join("fastapi_backend", "graph_cache")
 
-# --- 3. (Removed unused/redundant global model variables) ---
+# Logs dataset path
+LOGS_DATASET_PATH = os.path.join("extracted_dataset", "sorted_ds_with_labels.parquet")
 
 
 @app.on_event("startup")
 def load_all_models():
     """
     Load all models and feature lists into memory and
-    create the classifier service instance on app.state.
+    create service instances on app.state.
     """
     print("--- Application Startup: Loading models ---")
     
     # 1. Load LightGBM model
     if not os.path.exists(LIGHTGBM_PATH):
         raise FileNotFoundError(f"Model file not found: {LIGHTGBM_PATH}")
-    # Use a clear local variable name
     lgbm_model = joblib.load(LIGHTGBM_PATH)
-    print(f"Successfully loaded model from {LIGHTGBM_PATH}")
+    print(f"Successfully loaded LightGBM model from {LIGHTGBM_PATH}")
     
     # 2. Load expected feature columns list
     if not os.path.exists(FEATURE_LIST_PATH):
@@ -70,37 +75,32 @@ def load_all_models():
     except Exception as e:
         raise RuntimeError(f"Failed to load embedding model. Error: {e}")
 
-    # 4. Create and store the service instance
-    # This instance will be accessible via `request.app.state.classifier_service`
-    service_instance = ClassifierService(
+    # 4. Create and store the ClassifierService instance
+    classifier_service = ClassifierService(
         model=lgbm_model,
         embedding_model=embedding_model,
         expected_features=expected_features
     )
-    app.state.classifier_service = service_instance
-    print("--- ClassifierService is ready. ---")
+    app.state.classifier_service = classifier_service
+    print("ClassifierService is ready.")
     
-    # --- LOAD THE GRAPH BUILDER ---
-    print("--- Loading GraphBuilder ---")
+    # 5. Load the GraphBuilder
+    print("\n--- Loading GraphBuilder ---")
     try:
-        # Ensure the state directory exists
         if not os.path.isdir(AI_MODELS_DIR):
             raise FileNotFoundError(
                 f"GraphBuilder state directory not found: {AI_MODELS_DIR}\n"
                 f"(Expected to find scaler.joblib and cat_mappers.json here)"
             )
 
-        # Ensure the cache directory exists
         os.makedirs(GRAPH_CACHE_DIR, exist_ok=True)
         
-        # Instantiate the builder
-        # !! IMPORTANT: Update these params to match your training config !!
         graph_builder = GraphBuilder(
             output_dir=GRAPH_CACHE_DIR, 
             numeric_cols=['rule_level', 'rule_firedtimes', 'rule_id'],
             cat_cols=['rule_groups', 'rule_nist_800_53', 'rule_gdpr'],
             ip_cols=['agent_ip', 'data_srcip'],
-            desc_col='description_vector', # This must match what you use
+            desc_col='description_vector',
             min_nodes_per_graph=5,
             max_nodes_per_graph=20,
             candidate_edge_topk=10,
@@ -110,17 +110,32 @@ def load_all_models():
             stride=25,
         )
         
-        # Load the pre-fitted scaler and mappers
         graph_builder.load_state(AI_MODELS_DIR)
-        
-        # Store the ready-to-use instance on app.state
-        # This will be accessible via `request.app.state.graph_builder`
         app.state.graph_builder = graph_builder
-        print("--- GraphBuilder is ready. ---")
+        print("GraphBuilder is ready.")
         
     except Exception as e:
         print(f"CRITICAL: Failed to load GraphBuilder. Error: {e}")
-        # Depending on your needs, you might want to exit the app
-        # raise e 
+        raise e
     
-    print("--- All models loaded. Service is ready. ---")
+    # 6. Load the EdgePredictorService
+    print("\n--- Loading EdgePredictorService ---")
+    try:
+        if not os.path.exists(EDGE_PREDICTOR_MODEL_PATH):
+            print(f"Warning: Edge predictor model not found at {EDGE_PREDICTOR_MODEL_PATH}")
+            print("  EdgePredictorService will be available but model will load on first use.")
+        
+        edge_predictor_service = EdgePredictorService(
+            model_path=EDGE_PREDICTOR_MODEL_PATH,
+            hidden_channels=EDGE_PREDICTOR_HIDDEN_CHANNELS,
+            device='cpu'  # Change to 'cuda' if GPU available
+        )
+        
+        app.state.edge_predictor_service = edge_predictor_service
+        print("EdgePredictorService is ready.")
+        
+    except Exception as e:
+        print(f"CRITICAL: Failed to initialize EdgePredictorService. Error: {e}")
+        raise e
+    
+    print("\n--- All models loaded. Service is ready. ---")

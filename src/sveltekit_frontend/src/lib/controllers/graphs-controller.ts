@@ -1,4 +1,4 @@
-import type { BuildGraphsResponse, GraphData, LogItem } from "$lib/schema/models";
+import type { BuildGraphsResponse, GraphData, LogItem, PredictAttackGraphResponse } from "$lib/schema/models";
 import { apiFetch, apiPost } from "./client-api";
 
 /**
@@ -21,5 +21,49 @@ export async function getGraphData(graphPath: string): Promise<GraphData> {
 export async function buildGraphs(logs: LogItem[]): Promise<BuildGraphsResponse> {
   // Send logs to /graphs/build endpoint
   const response: BuildGraphsResponse = await apiPost("/graphs/build", { logs });
+  return response;
+}
+
+/**
+ * Predicts attack sequences in a graph using the EdgePredictor model.
+ * @param graphPath The path/filename of the graph file in graph_cache (e.g., "graph_chunk_0.npz")
+ * @param logs An array of LogItem objects that are part of the graph
+ * @param threshold Probability threshold for attack edges (0.0-1.0)
+ * @param summarize Whether to return a summarized graph or full graph
+ * @returns A promise that resolves to PredictAttackGraphResponse
+ */
+export async function predictAttackGraph(
+  graphPath: string,
+  logs: LogItem[],
+  threshold: number = 0.9,
+  summarize: boolean = true
+): Promise<PredictAttackGraphResponse> {
+  // Extract just the filename if full path is provided
+  const filename = graphPath.split('/').pop() || graphPath;
+  
+  const requestBody = {
+    graph_path: filename,
+    logs: logs,
+    threshold: threshold,
+    summarize: summarize
+  };
+  
+  console.log('Predicting attack graph:', {
+    graphPath: filename,
+    numLogs: logs.length,
+    threshold,
+    summarize
+  });
+  
+  const response: PredictAttackGraphResponse = await apiPost("/graphs/predict", requestBody);
+  
+  console.log('Attack prediction response:', {
+    success: response.success,
+    message: response.message,
+    hasGraph: !!response.graph,
+    totalNodes: response.graph?.total_nodes,
+    totalEdges: response.graph?.total_edges
+  });
+  
   return response;
 }

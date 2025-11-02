@@ -68,3 +68,57 @@ export interface GraphData {
   edge_index: number[][];
   log_ids: string[];
 }
+
+/**
+ * Attack Graph Node - represents a node in the attack graph
+ */
+export interface AttackGraphNode {
+  id: string;
+  description: string;
+  rule_groups: string[];
+  rule_id: string;
+  nist_800_53: string[];
+  gdpr: string[];
+  timestamp: string;
+  max_incident_prob: number;
+}
+
+/**
+ * Attack Graph Edge - represents an edge in the attack graph
+ */
+export interface AttackGraphEdge {
+  timestamp: string;
+  source_log_id: string;
+  dest_log_id: string;
+  edge_prob: number;
+}
+
+/**
+ * Attack Graph Data - the complete attack graph response
+ */
+export interface AttackGraphData {
+  total_nodes: number;
+  total_edges: number;
+  important_nodes: number;
+  important_edges: number;
+  sample_nodes: AttackGraphNode[];
+  sample_edges: AttackGraphEdge[];
+}
+
+/**
+ * Predict Attack Graph Response - response from the predict endpoint
+ */
+export interface PredictAttackGraphResponse {
+  success: boolean;
+  message: string;
+  graph: AttackGraphData | null;
+  threshold: number;
+  metadata?: {
+    graph_path: string;
+    num_nodes: number;
+    num_edges: number;
+    num_features: number;
+    num_logs_provided: number;
+  };
+}
+

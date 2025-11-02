@@ -1,7 +1,7 @@
 <script lang="ts">
   import { buildGraphs, getGraphData } from '$lib/controllers/graphs-controller';
   import type { GraphData } from '$lib/schema/models';
-  import { selectedLogs, showAlert } from '$lib/stores/generalStores';
+  import { graphFiles, selectedLogs, showAlert } from '$lib/stores/generalStores';
   import { tick } from 'svelte';
   import cytoscape from 'cytoscape';
 
@@ -10,7 +10,6 @@
   let cy: any = null;
   
   // State management
-  let graphFiles: string[] = [];
   let selectedGraph: string | null = null;
   let graphData: GraphData | null = null;
   let isLoading = false;
@@ -41,7 +40,7 @@
     
     isLoading = true;
     error = null;
-    graphFiles = [];
+    $graphFiles = [];
     selectedGraph = null;
     graphData = null;
     
@@ -52,14 +51,14 @@
     
     try {
       const response = await buildGraphs($selectedLogs);
-      graphFiles = response.graph_files || [];
-      const message = response.message || `Built ${graphFiles.length} graphs`;
+      $graphFiles = response.graph_files || [];
+      const message = response.message || `Built ${$graphFiles.length} graphs`;
       
       showAlert(message, "success", 5000);
 
       // Auto-select first graph
-      if (graphFiles.length > 0) {
-        await selectGraph(graphFiles[0]);
+      if ($graphFiles.length > 0) {
+        await selectGraph($graphFiles[0]);
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to build graphs';
@@ -345,14 +344,14 @@
   <div class="main-content">
     <!-- Left Panel: Graph List -->
     <div class="left-panel">
-      <h2>Generated Graphs ({graphFiles.length})</h2>
+      <h2>Generated Graphs ({$graphFiles.length})</h2>
       
       {#if isLoading}
         <div class="loading-state">
           <div class="spinner-border"></div>
           <p>Building graphs...</p>
         </div>
-      {:else if graphFiles.length === 0}
+      {:else if $graphFiles.length === 0}
         <div class="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"/>
@@ -364,7 +363,7 @@
         </div>
       {:else}
         <div class="graph-list">
-          {#each graphFiles as graphPath}
+          {#each $graphFiles as graphPath}
             <button
               class="graph-item"
               class:selected={selectedGraph === graphPath}

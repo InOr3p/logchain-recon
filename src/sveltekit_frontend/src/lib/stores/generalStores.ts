@@ -17,3 +17,4 @@ export function showAlert(message = "", color = 'danger', duration = 5000) {
 export const logs = writable<any[]>([]);
 export const selectedLogs = writable<any[]>([]);
 export const agents = writable<any[]>([]);
+export const graphFiles = writable<any[]>([]);

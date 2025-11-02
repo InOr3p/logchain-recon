@@ -125,25 +125,30 @@ class GraphBuilder:
     def _preprocess_features(self, df: pd.DataFrame) -> np.ndarray:
         """
         Generates node features for all nodes in the given DataFrame.
-        Assumes scaler and mappers have already been loaded.
+        [DEBUGGING VERSION]
         """
         if not self._scaler_fitted:
             raise RuntimeError("Scaler has not been loaded. Call .load_state() first.")
         if not self._mappers_fitted:
             raise RuntimeError("Mappers have not been loaded. Call .load_state() first.")
         
+        print("\n--- [DEBUG] Feature Dimension Report ---")
+
         # 1. Numeric features
         numeric = df[self.numeric_cols].fillna(0).to_numpy(dtype=np.float32)
         numeric_scaled = self.scaler.transform(numeric) if self.numeric_cols else np.zeros((len(df), 0))
+        print(f"Numeric Features Shape:       {numeric_scaled.shape}")
 
         # 2. Categorical features (multi-hot)
         cat_feats_list = []
+        total_cat_dims = 0
         for col in self.cat_cols:
             if col not in self.cat_mappers:
                 warnings.warn(f"Column '{col}' was not in loaded mappers. Skipping.")
                 continue
             mapping = self.cat_mappers[col]
             num_uniques = len(mapping)
+            total_cat_dims += num_uniques # Tally total dims
             if num_uniques == 0:
                 continue
 
@@ -155,24 +160,46 @@ class GraphBuilder:
                 for token in tokens:
                     if token in mapping:
                         feat[i, mapping[token]] = 1.0
+            
             cat_feats_list.append(feat)
+            # This print shows the dimension of each component mapper
+            print(f"  - Categorical '{col}' Shape:  (N, {num_uniques})")
         
         cat_feats = np.concatenate(cat_feats_list, axis=1) if cat_feats_list else np.zeros((len(df), 0))
+        print(f"Total Categorical Shape:    {cat_feats.shape} (Total Dims: {total_cat_dims})")
 
         # 3. Description embedding
         if self.desc_col not in df.columns:
             raise ValueError(f"Description column '{self.desc_col}' not found.")
         emb = np.stack(df[self.desc_col].values).astype(np.float32)
+        print(f"Embedding ('{self.desc_col}') Shape: {emb.shape}")
 
         # 4. IP features
         ip_feats_list = []
+        total_ip_dims = 0
         for col in self.ip_cols:
             feats = np.stack([self._hash_string(v, self.hash_dim_ip) for v in df[col]], axis=0)
             ip_feats_list.append(feats)
+            total_ip_dims += self.hash_dim_ip # Tally total dims
+            # This print shows the dimension of each IP hash
+            print(f"  - IP Hash '{col}' Shape:       (N, {self.hash_dim_ip})")
+            
         ip_feats = np.concatenate(ip_feats_list, axis=1) if ip_feats_list else np.zeros((len(df), 0))
+        print(f"Total IP Hash Shape:        {ip_feats.shape} (Total Dims: {total_ip_dims})")
 
         # Combine all features
         node_feats = np.concatenate([emb, numeric_scaled, cat_feats, ip_feats], axis=1).astype(np.float32)
+        print("------------------------------------------")
+        print(f"FINAL Node Features Shape:  {node_feats.shape}")
+        print("------------------------------------------\n")
+        
+        # Calculate and show the sum
+        total_dims_calc = emb.shape[1] + numeric_scaled.shape[1] + cat_feats.shape[1] + ip_feats.shape[1]
+        print(f"Calculated Total Dims: {emb.shape[1]} (emb) + {numeric_scaled.shape[1]} (num) + {cat_feats.shape[1]} (cat) + {ip_feats.shape[1]} (ip) = {total_dims_calc}")
+        
+        if node_feats.shape[1] != total_dims_calc:
+             print("!!! ERROR: Concatenated shape does not match sum of parts!!!")
+        
         return node_feats
 
     # =========================================================
