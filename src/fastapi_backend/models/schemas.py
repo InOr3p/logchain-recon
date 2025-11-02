@@ -49,7 +49,6 @@ class GraphPredictRequest(BaseModel):
     threshold: float = Field(default=0.5, ge=0.0, le=1.0, description="Probability threshold")
     summarize: bool = Field(default=True, description="Return summarized or full graph")
 
-
 class GraphPredictResponse(BaseModel):
     """Response model for graph prediction."""
     success: bool
@@ -57,3 +56,64 @@ class GraphPredictResponse(BaseModel):
     graph: Optional[Dict[str, Any]] = None
     threshold: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+# =========================================================
+# SCHEMAS FOR REPORT GENERATION
+# =========================================================
+
+class AttackTimelineStep(BaseModel):
+    """Single step in the attack timeline."""
+    step: int
+    action: str
+    timestamp: Optional[str] = None
+
+
+class NistCsfMapping(BaseModel):
+    """NIST Cybersecurity Framework mapping."""
+    Identify: str
+    Protect: str
+    Detect: str
+    Respond: str
+    Recover: str
+
+
+class AttackReport(BaseModel):
+    """Generated attack analysis report."""
+    attack_name: str
+    attack_summary: str
+    severity: str
+    confidence: str
+    nist_csf_mapping: NistCsfMapping
+    attack_timeline: List[AttackTimelineStep]
+    recommended_actions: List[str]
+    indicators_of_compromise: List[str]
+
+
+class GenerateReportRequest(BaseModel):
+    """Request model for report generation."""
+    graph_summary: Dict[str, Any] = Field(
+        ...,
+        description="Summarized attack graph data from EdgePredictor"
+    )
+    model_name: Optional[str] = Field(
+        default=None,
+        description="LLM model to use (defaults to configured model)"
+    )
+
+
+class GenerateReportResponse(BaseModel):
+    """Response model for report generation."""
+    success: bool
+    message: Optional[str] = None
+    report: Optional[AttackReport] = None
+    error: Optional[str] = None
+    raw_output: Optional[str] = None
+
+
+class ReportHealthResponse(BaseModel):
+    """Response model for report service health check."""
+    status: str
+    ollama_available: bool
+    default_model: str
+    message: Optional[str] = None

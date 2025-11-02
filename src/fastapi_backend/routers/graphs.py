@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 
-from fastapi_backend.models.schemas import BuildGraphsResponse, GraphPredictRequest, GraphPredictResponse, LogsRequest
+from fastapi_backend.models.schemas import AttackReport, BuildGraphsResponse, GenerateReportRequest, GenerateReportResponse, GraphPredictRequest, GraphPredictResponse, LogsRequest
 
 
 router = APIRouter(prefix="/graphs", tags=["Graphs"])
@@ -214,4 +214,130 @@ async def predict_graph(
         raise HTTPException(
             status_code=500,
             detail=f"Prediction error: {str(e)}"
+        )
+    
+
+@router.post("/generate-report", response_model=GenerateReportResponse)
+async def generate_report(
+    request_data: GenerateReportRequest,
+    request: Request
+):
+    """
+    Generate an attack analysis report from an attack graph summary.
+    
+    This endpoint uses a local LLM (Ollama) to analyze the attack graph
+    and generate a structured report with:
+    - Attack identification and classification
+    - NIST CSF mapping
+    - Attack timeline
+    - Recommended actions
+    - Indicators of compromise
+    
+    Args:
+        request_data: GenerateReportRequest with graph summary and optional model
+        request: FastAPI Request object to access app.state services
+        
+    Returns:
+        GenerateReportResponse with the generated report or error information
+        
+    Example:
+        POST /graphs/generate-report
+        {
+            "graph_summary": {
+                "total_nodes": 15,
+                "total_edges": 42,
+                "sample_nodes": [...],
+                "sample_edges": [...]
+            },
+            "model_name": "llama3.2"
+        }
+    """
+    try:
+        # Get the ReportGenerationService from app.state
+        report_service = request.app.state.report_service
+        
+        if report_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Report generation service is not available. Ensure Ollama is running."
+            )
+        
+        # Validate graph summary
+        if not request_data.graph_summary:
+            raise HTTPException(
+                status_code=400,
+                detail="Graph summary cannot be empty"
+            )
+        
+        # Check if Ollama is available
+        if not report_service.check_ollama_health():
+            raise HTTPException(
+                status_code=503,
+                detail="Ollama service is not available. Please start Ollama and try again."
+            )
+        
+        # Generate the report
+        result = report_service.generate_report(
+            graph_summary=request_data.graph_summary,
+            model_name=request_data.model_name
+        )
+        
+        if result.get("success"):
+            return GenerateReportResponse(
+                success=True,
+                message="Report generated successfully",
+                report=AttackReport(**result["report"])
+            )
+        else:
+            # Return error but don't raise HTTPException
+            return GenerateReportResponse(
+                success=False,
+                error=result.get("error", "Unknown error"),
+                raw_output=result.get("raw_output")
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Report generation error: {str(e)}"
+        )
+
+
+@router.get("/report/health")
+async def report_health(request: Request):
+    """
+    Check if the report generation service is healthy.
+    
+    Args:
+        request: FastAPI Request object to access app.state services
+        
+    Returns:
+        Health status information
+    """
+    try:
+        report_service = request.app.state.report_service
+        
+        if report_service is None:
+            return {
+                "status": "unavailable",
+                "ollama_available": False,
+                "message": "Report service not initialized"
+            }
+        
+        ollama_available = report_service.check_ollama_health()
+        
+        return {
+            "status": "healthy" if ollama_available else "degraded",
+            "ollama_available": ollama_available,
+            "default_model": report_service.default_model,
+            "ollama_api_url": report_service.ollama_api_url,
+            "message": "Ollama is running" if ollama_available else "Ollama is not accessible"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Health check error: {str(e)}"
         )

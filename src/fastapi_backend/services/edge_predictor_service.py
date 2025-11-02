@@ -19,7 +19,6 @@ class EdgePredictorService:
         self,
         model_path: str = 'models/gnn_edge_predictor_10epochs.pth',
         hidden_channels: int = 128,
-        device: str = 'cpu'
     ):
         """
         Initialize the EdgePredictorService.
@@ -27,11 +26,9 @@ class EdgePredictorService:
         Args:
             model_path: Path to the trained model weights
             hidden_channels: Number of hidden channels in the model
-            device: Device to run the model on ('cpu' or 'cuda')
         """
         self.model_path = model_path
         self.hidden_channels = hidden_channels
-        self.device = device
         self.model = None
         self.in_channels = None
         
@@ -43,8 +40,7 @@ class EdgePredictorService:
                 in_channels=in_channels,
                 hidden_channels=self.hidden_channels
             )
-            self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
-            self.model.to(self.device)
+            self.model.load_state_dict(torch.load(self.model_path))
             self.model.eval()
             self.in_channels = in_channels
             print("Model loaded successfully.")
@@ -63,7 +59,6 @@ class EdgePredictorService:
             raise ValueError("Model not loaded. Call load_model() first.")
         
         self.model.eval()
-        data = data.to(self.device)
         with torch.no_grad():
             logits = self.model(data)
             probs = torch.sigmoid(logits)
@@ -195,7 +190,7 @@ class EdgePredictorService:
         self,
         graph: Dict,
         max_nodes: int = 10,
-        max_edges: int = 40
+        max_edges: int = 30
     ) -> Dict:
         """
         Summarize the attack graph for LLM analysis.

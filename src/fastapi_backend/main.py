@@ -7,6 +7,7 @@ from fastapi_backend.routers import agents, graphs, logs, users
 from fastapi_backend.services.classifier_service import ClassifierService
 from fastapi_backend.services.graph_builder_service import GraphBuilder
 from fastapi_backend.services.edge_predictor_service import EdgePredictorService
+from fastapi_backend.services.report_generation_service import ReportGenerationService
 
 app = FastAPI(title="Logchain Recon API")
 
@@ -40,6 +41,10 @@ FEATURE_LIST_PATH = os.path.join(AI_MODELS_DIR, "feature_columns.joblib")
 # Paths for EdgePredictorService
 EDGE_PREDICTOR_MODEL_PATH = os.path.join(AI_MODELS_DIR, "gnn_edge_predictor_10epochs.pth")
 EDGE_PREDICTOR_HIDDEN_CHANNELS = 128
+
+# Paths for ReportGenerationService
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
+OLLAMA_DEFAULT_MODEL = "llama3.2"
 
 # Directory where the builder will save temporary .npz graph files
 GRAPH_CACHE_DIR = os.path.join("fastapi_backend", "graph_cache")
@@ -128,7 +133,6 @@ def load_all_models():
         edge_predictor_service = EdgePredictorService(
             model_path=EDGE_PREDICTOR_MODEL_PATH,
             hidden_channels=EDGE_PREDICTOR_HIDDEN_CHANNELS,
-            device='cpu'  # Change to 'cuda' if GPU available
         )
         
         app.state.edge_predictor_service = edge_predictor_service
@@ -137,5 +141,29 @@ def load_all_models():
     except Exception as e:
         print(f"CRITICAL: Failed to initialize EdgePredictorService. Error: {e}")
         raise e
+    
+    # 7. Load the ReportGenerationService
+    print("\n--- Loading ReportGenerationService ---")
+    try:
+        report_service = ReportGenerationService(
+            ollama_api_url=OLLAMA_API_URL,
+            default_model=OLLAMA_DEFAULT_MODEL,
+            timeout=180
+        )
+        
+        # Check if Ollama is available
+        if report_service.check_ollama_health():
+            print("Ollama service is running and accessible")
+        else:
+            print("Warning: Ollama service is not accessible")
+            print("  Reports will fail until Ollama is started")
+        
+        app.state.report_service = report_service
+        print("ReportGenerationService is ready.")
+        
+    except Exception as e:
+        print(f"Warning: Failed to initialize ReportGenerationService. Error: {e}")
+        print("  Report generation will not be available")
+        app.state.report_service = None
     
     print("\n--- All models loaded. Service is ready. ---")

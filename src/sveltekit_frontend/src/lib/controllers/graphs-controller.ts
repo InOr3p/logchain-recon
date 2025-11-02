@@ -1,4 +1,4 @@
-import type { BuildGraphsResponse, GraphData, LogItem, PredictAttackGraphResponse } from "$lib/schema/models";
+import type { AttackGraphData, BuildGraphsResponse, GenerateReportRequest, GenerateReportResponse, GraphData, LogItem, PredictAttackGraphResponse, ReportHealthResponse } from "$lib/schema/models";
 import { apiFetch, apiPost } from "./client-api";
 
 /**
@@ -66,4 +66,45 @@ export async function predictAttackGraph(
   });
   
   return response;
+}
+
+
+/**
+ * Generates an attack analysis report from an attack graph summary.
+ * @param graphSummary Summarized attack graph data from prediction
+ * @param modelName Optional LLM model name to use
+ * @returns A promise that resolves to GenerateReportResponse
+ */
+export async function generateReport(
+  graphSummary: AttackGraphData,
+  modelName?: string
+): Promise<GenerateReportResponse> {
+  const requestBody: GenerateReportRequest = {
+    graph_summary: graphSummary,
+    model_name: modelName
+  };
+  
+  console.log('Generating report for attack graph:', {
+    totalNodes: graphSummary.total_nodes,
+    totalEdges: graphSummary.total_edges,
+    model: modelName || 'default'
+  });
+  
+  const response: GenerateReportResponse = await apiPost("/graphs/generate-report", requestBody);
+  
+  console.log('Report generation response:', {
+    success: response.success,
+    hasReport: !!response.report,
+    error: response.error
+  });
+  
+  return response;
+}
+
+/**
+ * Checks the health status of the report generation service.
+ * @returns A promise that resolves to ReportHealthResponse
+ */
+export async function checkReportHealth(): Promise<ReportHealthResponse> {
+  return apiFetch("/graphs/report/health");
 }

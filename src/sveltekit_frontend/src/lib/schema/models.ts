@@ -122,3 +122,79 @@ export interface PredictAttackGraphResponse {
   };
 }
 
+
+// ==================== Report Generation Types ====================
+
+/**
+ * Attack Timeline Step
+ */
+export interface AttackTimelineStep {
+  step: number;
+  action: string;
+  timestamp?: string;
+}
+
+/**
+ * NIST Cybersecurity Framework Mapping
+ */
+export interface NistCsfMapping {
+  Identify: string;
+  Protect: string;
+  Detect: string;
+  Respond: string;
+  Recover: string;
+}
+
+/**
+ * Attack Report - complete generated report
+ */
+export interface AttackReport {
+  attack_name: string;
+  attack_summary: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  confidence: string;
+  nist_csf_mapping: NistCsfMapping;
+  attack_timeline: AttackTimelineStep[];
+  recommended_actions: string[];
+  indicators_of_compromise: string[];
+}
+
+/**
+ * Generate Report Request
+ */
+export interface GenerateReportRequest {
+  graph_summary: AttackGraphData;
+  model_name?: string;
+}
+
+/**
+ * Generate Report Response
+ */
+export interface GenerateReportResponse {
+  success: boolean;
+  message?: string;
+  report?: AttackReport;
+  error?: string;
+  raw_output?: string;
+}
+
+/**
+ * Predicted Graph - stores attack graph with its metadata
+ */
+export interface PredictedGraph {
+  graph_path: string;
+  graph_summary: AttackGraphData;
+  timestamp: number;
+  threshold: number;
+}
+
+/**
+ * Report Health Response
+ */
+export interface ReportHealthResponse {
+  status: string;
+  ollama_available: boolean;
+  default_model: string;
+  ollama_api_url?: string;
+  message?: string;
+}

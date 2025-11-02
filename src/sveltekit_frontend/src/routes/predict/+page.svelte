@@ -1,7 +1,7 @@
 <script lang="ts">
   import { predictAttackGraph, getGraphData } from '$lib/controllers/graphs-controller';
   import type { AttackGraphData, GraphData } from '$lib/schema/models';
-  import { graphFiles, logs, showAlert } from '$lib/stores/generalStores';
+  import { addPredictedGraph, graphFiles, logs, showAlert } from '$lib/stores/generalStores';
   import { tick } from 'svelte';
   import cytoscape from 'cytoscape';
 
@@ -135,6 +135,12 @@
         attackGraphData = response.graph;
         const message = response.message || 'Attack prediction completed';
         showAlert(message, "success", 5000);
+        attackGraphData = response.graph;
+        
+        // Save to store for report generation
+        if (selectedGraphPath) {
+          addPredictedGraph(selectedGraphPath, response.graph);
+        }
         
         // Wait for DOM update
         await tick();
@@ -964,12 +970,7 @@
     color: #e0e0e0;
     margin: 0 0 0.5rem 0;
   }
-  
-  .subtitle {
-    color: #999;
-    font-size: 1rem;
-    margin: 0;
-  }
+
   
   .controls {
     display: flex;
