@@ -267,7 +267,10 @@ class GraphBuilder:
         # Use indices for quick selection
         sub_df_indices = sub_df.index
         neg_pool = full_df[~full_df.index.isin(sub_df_indices)]
-        
+        # remove from neg_pool any log that has the same attack label as sub_df
+        sub_attack_labels = set(sub_df['type_attack_label'].unique())
+        neg_pool = neg_pool[~neg_pool['type_attack_label'].isin(sub_attack_labels)]
+    
         if len(neg_pool) > 0:
             # Sample up to 2x the subgraph size
             n_samples = min(len(neg_pool), num_sub_nodes * 2)

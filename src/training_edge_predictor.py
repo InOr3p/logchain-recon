@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import SAGEConv
+from torch_geometric.nn import SAGEConv, GCNConv, GATConv
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -26,7 +26,7 @@ GNN_LAYERS = 2
 
 # --- Training Config ---
 LEARNING_RATE = 0.001
-EPOCHS = 20
+EPOCHS = 10
 BATCH_SIZE = 32
 TRAIN_SPLIT_RATIO = 0.8
 
@@ -69,16 +69,58 @@ class AttackGraphDataset(Dataset):
 class EdgePredictorGNN(nn.Module):
     """
     GNN that classifies edges, structured as an Encoder-Decoder.
+    Allows selection between SAGEConv, GCNConv, and GATConv.
     """
-    def __init__(self, in_channels, hidden_channels, num_layers=2, dropout_p=0.3):
+    def __init__(self, in_channels, hidden_channels, num_layers=2, dropout_p=0.3, 
+                 gnn_type: str = 'sage', heads: int = 4):
+        
         super(EdgePredictorGNN, self).__init__()
         self.dropout_p = dropout_p
         self.encoder_convs = nn.ModuleList()
-        self.encoder_convs.append(SAGEConv(in_channels, hidden_channels))
+        gnn_type = gnn_type.lower()
+        
+        # --- 1. Define the GNN Layer Helper Function ---
+        def get_conv(in_c, out_c, is_last=False):
+            if gnn_type == 'sage':
+                return SAGEConv(in_c, out_c)
+            elif gnn_type == 'gcn':
+                return GCNConv(in_c, out_c)
+            elif gnn_type == 'gat':
+                # For GAT: we use concatenation (concat=True) for intermediate layers, 
+                # and averaging (concat=False) for the final layer to match out_c
+                concat = not is_last
+                return GATConv(in_c, out_c, heads=heads, concat=concat)
 
-        for _ in range(num_layers - 1):
-            self.encoder_convs.append(SAGEConv(hidden_channels, hidden_channels))
+        # --- 2. Initialize Encoder Layers ---
+        
+        # Determine input/output sizes based on GNN type
+        current_in_channels = in_channels
+        
+        for i in range(num_layers):
+            is_last_layer = (i == num_layers - 1)
+            
+            # For GAT: intermediate layers concatenate heads, changing the output/input size
+            if gnn_type == 'gat' and i > 0:
+                current_in_channels = hidden_channels * heads
+            
+            # The last layer always outputs 'hidden_channels' for the decoder
+            output_channels = hidden_channels
+            
+            # GAT intermediate layers output hidden_channels * heads
+            if gnn_type == 'gat' and not is_last_layer:
+                output_channels = hidden_channels
 
+            # Add the convolution layer
+            conv_layer = get_conv(current_in_channels, output_channels, is_last=is_last_layer)
+            self.encoder_convs.append(conv_layer)
+            
+            # Update input channels for the next layer (only applies to the very first layer for non-GAT)
+            if gnn_type != 'gat':
+                current_in_channels = hidden_channels
+
+
+        # --- 3. Initialize Decoder ---
+        # The decoder input remains hidden_channels * 2 (source + destination embeddings)
         self.decoder = nn.Sequential(
             nn.Linear(hidden_channels * 2, hidden_channels),
             nn.ReLU(),
@@ -97,6 +139,7 @@ class EdgePredictorGNN(nn.Module):
     def decode(self, z, edge_index):
         node_src_embeds = z[edge_index[0]]
         node_dst_embeds = z[edge_index[1]]
+        # Concatenate embeddings
         edge_embeds = torch.cat([node_src_embeds, node_dst_embeds], dim=1)
         return self.decoder(edge_embeds)
 
@@ -105,7 +148,7 @@ class EdgePredictorGNN(nn.Module):
         z = self.encode(x, edge_index)
         logits = self.decode(z, edge_index)
         return logits.squeeze(-1)
-
+    
 # -----------------------------------------------
 # --- TRAINING AND VALIDATION FUNCTIONS
 # -----------------------------------------------
@@ -244,7 +287,7 @@ def main():
     in_channels = dataset.num_node_features
     print(f"Detected {in_channels} input node features.")
     
-    model = EdgePredictorGNN(in_channels, HIDDEN_CHANNELS, GNN_LAYERS).to(device)
+    model = EdgePredictorGNN(in_channels, HIDDEN_CHANNELS, GNN_LAYERS, gnn_type="gat").to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.BCEWithLogitsLoss()
 
