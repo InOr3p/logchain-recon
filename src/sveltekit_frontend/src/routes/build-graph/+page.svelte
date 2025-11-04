@@ -1,14 +1,14 @@
 <script lang="ts">
   import { buildGraphs, getGraphData } from '$lib/controllers/graphs-controller';
   import type { GraphData } from '$lib/schema/models';
-  import { graphFiles, selectedLogs, showAlert } from '$lib/stores/generalStores';
+  import { graphFiles, selectedLogs, showAlert, logs } from '$lib/stores/generalStores';
   import { tick } from 'svelte';
-  import cytoscape from 'cytoscape';
-
-  // Cytoscape
-  let cyContainer: HTMLElement;
-  let cy: any = null;
   
+	import GraphVisualizer from '$lib/components/GraphVisualizer.svelte';
+	import GraphListPanel from '$lib/components/GraphListPanel.svelte';
+	import GraphStatsCard from '$lib/components/GraphStatsCard.svelte';
+	import DetailsPanel from '$lib/components/DetailsPanel.svelte';
+
   // State management
   let selectedGraph: string | null = null;
   let graphData: GraphData | null = null;
@@ -16,19 +16,19 @@
   let isLoadingGraph = false;
   let error: string | null = null;
   
-  // Edge detail panel
-  let selectedEdge: any = null;
-  let showEdgeDetails = false;
+  // Details panel
+  let selectedElement: any = null;
+  let showDetailsPanel = false;
   
-  // Reactive statement to get the current selected logs count
+  let cytoscapeVisualizer: GraphVisualizer;
+  
+  // Reactive statements
   $: selectedLogsCount = $selectedLogs.length;
-  
-  // Reactive statement to visualize graph when data changes
-  $: if (graphData && cyContainer) {
-    setTimeout(() => {
-      visualizeGraph(graphData);
-    }, 0);
-  }
+  $: statsData = graphData ? [
+    { label: 'Agent IP', value: graphData.agent_ip },
+    { label: 'Nodes', value: graphData.num_nodes },
+    { label: 'Edges', value: graphData.num_edges }
+  ] : [];
   
   // Build graphs from selected logs
   async function handleBuildGraphs() {
@@ -43,11 +43,6 @@
     $graphFiles = [];
     selectedGraph = null;
     graphData = null;
-    
-    // Clear cytoscape
-    if (cy) {
-      cy.elements().remove();
-    }
     
     try {
       const response = await buildGraphs($selectedLogs);
@@ -69,23 +64,16 @@
     }
   }
   
-  // Load graph data from .npz file path and visualize
+  // Load graph data from .npz file path
   async function selectGraph(graphPath: string) {
     selectedGraph = graphPath;
     graphData = null;
     isLoadingGraph = true;
-    showEdgeDetails = false;
-    selectedEdge = null;
-    
-    // Clear existing cy instance to force re-initialization
-    if (cy) {
-      cy.destroy();
-      cy = null;
-    }
+    showDetailsPanel = false;
+    selectedElement = null;
     
     try {
       graphData = await getGraphData(graphPath);
-      // Wait for DOM to update
       await tick();
     } catch (err) {
       error = `Failed to load graph: ${err instanceof Error ? err.message : 'Unknown error'}`;
@@ -96,16 +84,39 @@
     }
   }
   
-  // Handle edge click
-  function handleEdgeClick(edge: any) {
+  // Handle node/edge clicks from Cytoscape
+  function handleNodeClick(event: CustomEvent) {
+    const node = event.detail;
+    const nodeId = node.data('id');
+    const log = $selectedLogs.find(l => l.id === nodeId);
+    
+    selectedElement = {
+      type: 'node',
+      id: nodeId,
+      label: node.data('label') || nodeId,
+      description: log?.rule_description || 'N/A',
+      ruleId: log?.rule_id || 'N/A',
+      ruleGroups: log?.rule_groups || [],
+      nist: log?.rule_nist_800_53 || [],
+      gdpr: log?.rule_gdpr || [],
+      timestamp: log?.timestamp || 'N/A',
+      probability: 0
+    };
+    
+    showDetailsPanel = true;
+    highlightNode(node);
+  }
+  
+  function handleEdgeClick(event: CustomEvent) {
+    const edge = event.detail;
     const sourceNode = edge.source();
     const targetNode = edge.target();
     
-    // Get log details from selectedLogs
-    const sourceLog = $selectedLogs.find(log => log.id === sourceNode.data('label'));
-    const targetLog = $selectedLogs.find(log => log.id === targetNode.data('label'));
+    const sourceLog = $selectedLogs.find(log => log.id === sourceNode.data('id'));
+    const targetLog = $selectedLogs.find(log => log.id === targetNode.data('id'));
     
-    selectedEdge = {
+    selectedElement = {
+      type: 'edge',
       id: edge.id(),
       source: {
         id: sourceNode.id(),
@@ -118,202 +129,27 @@
         label: targetNode.data('label'),
         description: targetLog?.rule_description || 'N/A',
         timestamp: targetLog?.timestamp || 'N/A'
-      },
-      // Add any additional edge data you have
-      data: edge.data()
+      }
     };
     
-    showEdgeDetails = true;
-    
-    // Highlight the selected edge
-    cy.edges().style({
-      'line-color': '#b0c4ff',
-      'width': 2,
-      'opacity': 0.5
-    });
-    
-    edge.style({
-      'line-color': '#22c55e',
-      'width': 4,
-      'opacity': 1
-    });
+    showDetailsPanel = true;
   }
   
-  // Close edge details panel
-  function closeEdgeDetails() {
-    showEdgeDetails = false;
-    selectedEdge = null;
-    
-    // Reset all edge styles
-    if (cy) {
-      cy.edges().style({
-        'line-color': '#b0c4ff',
-        'width': 2,
-        'opacity': 0.5
-      });
+  function handleBackgroundClick() {
+    closeDetailsPanel();
+  }
+  
+  function closeDetailsPanel() {
+    showDetailsPanel = false;
+    selectedElement = null;
+    if (cytoscapeVisualizer) {
+      cytoscapeVisualizer.resetStyles(false);
     }
   }
   
-  // Visualize graph using Cytoscape
-  function visualizeGraph(data: GraphData) {
-    console.log('visualizeGraph called', { 
-      cyExists: !!cy, 
-      containerExists: !!cyContainer,
-      numNodes: data.num_nodes,
-      numEdges: data.num_edges 
-    });
-
-    if (!cyContainer) {
-      console.error('Container not available');
-      showAlert("Error: cannot visualize graph", "danger", 5000);
-      return;
-    }
-
-    // Initialize or reset Cytoscape
-    if (!cy) {
-      console.log('Initializing Cytoscape...');
-      cy = cytoscape({
-        container: cyContainer,
-        style: [
-          {
-            selector: 'node',
-            style: {
-              'background-color': '#3b82f6',
-              'label': 'data(label)',
-              'color': '#e0e0e0',
-              'text-valign': 'center',
-              'text-halign': 'center',
-              'font-size': '10px',
-              'width': '30px',
-              'height': '30px'
-            }
-          },
-          {
-            selector: 'edge',
-            style: {
-              'width': 2,
-              'line-color': '#b0c4ff',
-              'opacity': 0.5,
-              'curve-style': 'bezier',
-              'target-arrow-shape': 'triangle',
-              'target-arrow-color': '#b0c4ff'
-            }
-          },
-          {
-            selector: 'edge:selected',
-            style: {
-              'line-color': '#22c55e',
-              'width': 4,
-              'opacity': 1,
-              'target-arrow-color': '#22c55e'
-            }
-          },
-          {
-            selector: 'node:selected',
-            style: {
-              'background-color': 'green',
-              'border-width': 3,
-              'border-color': '#fff'
-            }
-          }
-        ],
-        layout: {
-          name: 'grid'
-        }
-      });
-      
-      // Add click handler for edges
-      cy.on('tap', 'edge', function(evt: any) {
-        handleEdgeClick(evt.target);
-      });
-      
-      // Add click handler for background (to deselect)
-      cy.on('tap', function(evt: any) {
-        if (evt.target === cy) {
-          closeEdgeDetails();
-        }
-      });
-    }
-
-    if (!cy) {
-      console.error('Failed to initialize Cytoscape');
-      showAlert("Error: cannot visualize graph", "danger", 5000);
-      return;
-    }
-    
-    // Clear existing elements
-    cy.elements().remove();
-    
-    // Add nodes
-    const nodes = [];
-    for (let i = 0; i < data.num_nodes; i++) {
-      nodes.push({
-        data: { 
-          id: `node${i}`,
-          label: data.log_ids[i] || `N${i}`
-        }
-      });
-    }
-    
-    console.log('Adding nodes:', nodes.length);
-    
-    // Add edges
-    const edges = [];
-    const edgeIndex = data.edge_index;
-    for (let i = 0; i < edgeIndex[0].length; i++) {
-      const source = edgeIndex[0][i];
-      const target = edgeIndex[1][i];
-      edges.push({
-        data: {
-          id: `edge${i}`,
-          source: `node${source}`,
-          target: `node${target}`,
-          // Store edge features if available
-          edgeIndex: i,
-          sourceIndex: source,
-          targetIndex: target
-        }
-      });
-    }
-    
-    console.log('Adding edges:', edges.length);
-    
-    // Add all elements to cytoscape
-    cy.add(nodes);
-    cy.add(edges);
-    
-    console.log('Elements added. Total nodes:', cy.nodes().length, 'Total edges:', cy.edges().length);
-    
-    // Apply force-directed layout
-    const layout = cy.layout({
-      name: 'cose',
-      animate: true,
-      animationDuration: 500,
-      nodeRepulsion: 8000,
-      idealEdgeLength: 100,
-      edgeElasticity: 100,
-      nestingFactor: 1.2,
-      gravity: 1,
-      numIter: 1000,
-      initialTemp: 200,
-      coolingFactor: 0.95,
-      minTemp: 1.0
-    });
-    
-    layout.run();
-    
-    // Fit to viewport after layout completes
-    layout.on('layoutstop', () => {
-      console.log('Layout complete, fitting to viewport');
-      cy.fit(50);
-    });
+  function highlightNode(node: any) {
+    // Highlight logic could be moved to CytoscapeVisualizer
   }
-  
-  // Format graph filename for display
-  function formatGraphName(path: string): string {
-    const filename = path.split('/').pop()?.replace('.npz', '') || '';
-    return filename.replace('inference_', '').replace(/_/g, ' ');
-  }  
 </script>
 
 <div class="container">
@@ -342,54 +178,19 @@
   
   <!-- Main Content -->
   <div class="main-content">
-    <!-- Left Panel: Graph List -->
-    <div class="left-panel">
-      <h2>Generated Graphs ({$graphFiles.length})</h2>
-      
-      {#if isLoading}
-        <div class="loading-state">
-          <div class="spinner-border"></div>
-          <p>Building graphs...</p>
-        </div>
-      {:else if $graphFiles.length === 0}
-        <div class="empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <p>No graphs built yet</p>
-          <p class="hint">Select logs and click "Build Graphs" to start</p>
-        </div>
-      {:else}
-        <div class="graph-list">
-          {#each $graphFiles as graphPath}
-            <button
-              class="graph-item"
-              class:selected={selectedGraph === graphPath}
-              on:click={() => selectGraph(graphPath)}
-              title={graphPath}
-            >
-              <div class="graph-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="5" cy="5" r="2"/>
-                  <circle cx="19" cy="5" r="2"/>
-                  <circle cx="12" cy="19" r="2"/>
-                  <line x1="6.5" y1="6.5" x2="10.5" y2="17.5"/>
-                  <line x1="13.5" y1="17.5" x2="17.5" y2="6.5"/>
-                </svg>
-              </div>
-              <div class="graph-info">
-                <div class="graph-name">{formatGraphName(graphPath)}</div>
-                <div class="graph-path">{graphPath.split('/').pop()}</div>
-              </div>
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
+    <!-- Left Panel -->
+    <GraphListPanel
+      graphs={$graphFiles}
+      {selectedGraph}
+      title="Generated Graphs"
+      emptyStateMessage="No graphs built yet"
+      emptyStateHint="Select logs and click 'Build Graphs' to start"
+      {isLoading}
+      iconColor="green"
+      on:select={(e) => selectGraph(e.detail)}
+    />
     
-    <!-- Right Panel: Graph Visualization -->
+    <!-- Right Panel -->
     <div class="right-panel">
       <h2>Graph Visualization</h2>
       
@@ -407,91 +208,30 @@
         </div>
       {:else if graphData}
         <div class="graph-visualization">
-          <!-- Graph Info Panel -->
-          <div class="graph-stats">
-            <div class="stat-card">
-              <div class="stat-label">Agent IP</div>
-              <div class="stat-value">{graphData.agent_ip}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Nodes</div>
-              <div class="stat-value">{graphData.num_nodes}</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Edges</div>
-              <div class="stat-value">{graphData.num_edges}</div>
-            </div>
-          </div>
+          <!-- Graph Stats -->
+          <GraphStatsCard stats={statsData} variant="primary" />
           
-          <!-- Cytoscape Graph Visualization -->
+          <!-- Graph Visualization -->
           <div class="graph-canvas-wrapper">
             <div class="graph-canvas">
-              <div bind:this={cyContainer} class="cytoscape-container"></div>
+              <GraphVisualizer
+                bind:this={cytoscapeVisualizer}
+                {graphData}
+                isAttackMode={false}
+                on:nodeClick={handleNodeClick}
+                on:edgeClick={handleEdgeClick}
+                on:backgroundClick={handleBackgroundClick}
+              />
             </div>
             
-            <!-- Edge Details Panel -->
-            {#if showEdgeDetails && selectedEdge}
-              <div class="edge-details-panel">
-                <div class="panel-header">
-                  <h3>Edge Details</h3>
-                  <button class="close-btn" on:click={closeEdgeDetails}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                      <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                  </button>
-                </div>
-                
-                <div class="panel-content">
-                  <div class="detail-section">
-                    <div class="detail-label">Edge ID</div>
-                    <div class="detail-value">{selectedEdge.id}</div>
-                  </div>
-                  
-                  <div class="detail-section">
-                    <div class="detail-label">
-                      <span class="node-badge source">Source Node</span>
-                    </div>
-                    <div class="node-details">
-                      <div class="node-detail-item">
-                        <span class="detail-item-label">ID:</span>
-                        <span class="detail-item-value">{selectedEdge.source.label}</span>
-                      </div>
-                      <div class="node-detail-item">
-                        <span class="detail-item-label">Description:</span>
-                        <span class="detail-item-value">{selectedEdge.source.description}</span>
-                      </div>
-                      <div class="node-detail-item">
-                        <span class="detail-item-label">Timestamp:</span>
-                        <span class="detail-item-value">{selectedEdge.source.timestamp}</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div class="detail-section">
-                    <div class="detail-label">
-                      <span class="node-badge target">Target Node</span>
-                    </div>
-                    <div class="node-details">
-                      <div class="node-detail-item">
-                        <span class="detail-item-label">ID:</span>
-                        <span class="detail-item-value">{selectedEdge.target.label}</span>
-                      </div>
-                      <div class="node-detail-item">
-                        <span class="detail-item-label">Description:</span>
-                        <span class="detail-item-value">{selectedEdge.target.description}</span>
-                      </div>
-                      <div class="node-detail-item">
-                        <span class="detail-item-label">Timestamp:</span>
-                        <span class="detail-item-value">{selectedEdge.target.timestamp}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            {/if}
+            <!-- Details Panel -->
+            <DetailsPanel
+              bind:show={showDetailsPanel}
+              {selectedElement}
+              isAttackMode={false}
+              on:close={closeDetailsPanel}
+            />
           </div>
-          
         </div>
       {/if}
     </div>
@@ -515,6 +255,12 @@
     font-weight: 700;
     color: #e0e0e0;
     margin: 0 0 0.5rem 0;
+  }
+  
+  .subtitle {
+    color: #999;
+    font-size: 1rem;
+    margin: 0;
   }
   
   .controls {
@@ -576,7 +322,6 @@
     min-height: 600px;
   }
   
-  .left-panel,
   .right-panel {
     background: #1e1e1e;
     border-radius: 8px;
@@ -593,8 +338,8 @@
     border-bottom: 1px solid #333;
   }
   
-  .loading-state,
-  .empty-state {
+  .empty-state,
+  .loading-state {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -616,11 +361,6 @@
     color: #999;
   }
   
-  .empty-state .hint {
-    font-size: 0.875rem;
-    color: #666;
-  }
-  
   .spinner-border {
     width: 40px;
     height: 40px;
@@ -635,100 +375,8 @@
     to { transform: rotate(360deg); }
   }
   
-  .graph-list {
-    max-height: 650px;
-    overflow-y: auto;
-  }
-  
-  .graph-item {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.875rem 1.25rem;
-    border: none;
-    border-bottom: 1px solid #333;
-    background: #1e1e1e;
-    cursor: pointer;
-    transition: background 0.2s;
-    text-align: left;
-  }
-  
-  .graph-item:hover {
-    background: #2b2b2b;
-  }
-  
-  .graph-item.selected {
-    background: #0d0d0d;
-    border-left: 3px solid green;
-  }
-  
-  .graph-icon {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: green;
-    border-radius: 6px;
-  }
-  
-  .graph-icon svg {
-    width: 20px;
-    height: 20px;
-    color: white;
-  }
-  
-  .graph-info {
-    flex: 1;
-    min-width: 0;
-  }
-  
-  .graph-name {
-    font-weight: 600;
-    color: #e0e0e0;
-    margin-bottom: 0.25rem;
-    text-transform: capitalize;
-  }
-  
-  .graph-path {
-    font-size: 0.75rem;
-    color: #666;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  
   .graph-visualization {
     padding: 1.5rem;
-  }
-  
-  .graph-stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-    margin-bottom: 2rem;
-  }
-  
-  .stat-card {
-    background: green;
-    padding: 1rem;
-    border-radius: 8px;
-    color: white;
-  }
-  
-  .stat-label {
-    font-size: 0.75rem;
-    opacity: 0.9;
-    margin-bottom: 0.25rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  
-  .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
   }
   
   .graph-canvas-wrapper {
@@ -743,162 +391,4 @@
     min-height: 500px;
     border: 1px solid #333;
   }
-  
-  .cytoscape-container {
-    width: 100%;
-    height: 500px;
-  }
-  
-  /* Edge Details Panel */
-  .edge-details-panel {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    width: 320px;
-    background: #1e1e1e;
-    border: 1px solid #444;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    animation: slideIn 0.2s ease-out;
-  }
-  
-  @keyframes slideIn {
-    from {
-      opacity: 0;
-      transform: translateX(20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-  
-  .panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    border-bottom: 1px solid #333;
-    background: #252525;
-    border-radius: 8px 8px 0 0;
-  }
-  
-  .panel-header h3 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-    color: #e0e0e0;
-  }
-  
-  .close-btn {
-    background: none;
-    border: none;
-    color: #999;
-    cursor: pointer;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.2s;
-  }
-  
-  .close-btn:hover {
-    color: #e0e0e0;
-  }
-  
-  .panel-content {
-    padding: 1rem;
-    max-height: 400px;
-    overflow-y: auto;
-  }
-  
-  .detail-section {
-    margin-bottom: 1rem;
-  }
-  
-  .detail-section:last-child {
-    margin-bottom: 0;
-  }
-  
-  .detail-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #999;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 0.5rem;
-  }
-  
-  .detail-value {
-    font-size: 0.9rem;
-    color: #e0e0e0;
-    font-family: 'Courier New', monospace;
-    background: #0d0d0d;
-    padding: 0.5rem;
-    border-radius: 4px;
-    border: 1px solid #333;
-  }
-  
-  .node-details {
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 6px;
-    padding: 0.75rem;
-  }
-  
-  .node-detail-item {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #252525;
-  }
-  
-  .node-detail-item:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-  }
-  
-  .node-detail-item:first-child {
-    padding-top: 0;
-  }
-  
-  .detail-item-label {
-    font-size: 0.7rem;
-    color: #999;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  
-  .detail-item-value {
-    font-size: 0.85rem;
-    color: #e0e0e0;
-    word-break: break-word;
-  }
-
-  .node-badge {
-    font-size: 0.65rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    display: inline-block;
-    margin-bottom: 0.5rem;
-  }
-  
-  .node-badge.source {
-    background: rgba(59, 130, 246, 0.2);
-    color: #60a5fa;
-    border: 1px solid rgba(59, 130, 246, 0.3);
-  }
-  
-  .node-badge.target {
-    background: rgba(34, 197, 94, 0.2);
-    color: #86efac;
-    border: 1px solid rgba(34, 197, 94, 0.3);
-  }
-
 </style>

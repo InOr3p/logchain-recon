@@ -4,6 +4,8 @@
   import { generatedReports, predictedGraphs, showAlert } from '$lib/stores/generalStores';
   import { onMount } from 'svelte';
 
+  import GraphListPanel from '$lib/components/GraphListPanel.svelte';
+
   // State management
   let selectedGraphPath: string | null = null;
   let selectedGraphData: AttackGraphData | null = null;
@@ -14,7 +16,7 @@
   let checkingHealth = true;
 
   // Reactive statements
-  $: availableGraphs = Array.from($predictedGraphs.entries());
+  $: availableGraphs = Array.from($predictedGraphs.keys());
   $: hasGraphs = availableGraphs.length > 0;
 
   onMount(async () => {
@@ -91,9 +93,10 @@
     }
   }
 
-  function formatGraphName(path: string): string {
-    const filename = path.split('/').pop()?.replace('.npz', '') || '';
-    return filename.replace('inference_', '').replace(/_/g, ' ');
+  function formatGraphStats(graphPath: string): string {
+    const graphData = $predictedGraphs.get(graphPath);
+    if (!graphData) return '';
+    return `${graphData.total_nodes} nodes • ${graphData.total_edges} edges`;
   }
 
   function exportReport() {
@@ -153,7 +156,7 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
   <!-- Header -->
   <div class="header">
     <h1>Attack Report Generator</h1>
-    <p class=" mb-3">Generate AI-powered attack analysis reports using local Ollama</p>
+    <p class="subtitle mb-3">Generate AI-powered attack analysis reports using local Ollama</p>
     
     {#if checkingHealth}
       <div class="health-badge checking">Checking Ollama status...</div>
@@ -167,48 +170,22 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
   <!-- Main Content -->
   <div class="main-content">
     <!-- Left Panel: Predicted Graphs Selection -->
-    <div class="left-panel">
-      <h2>Predicted Graphs ({availableGraphs.length})</h2>
-
-      {#if !hasGraphs}
-        <div class="empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <p>No predicted graphs available</p>
-          <p class="hint">Run attack prediction first in the Predict tab</p>
+    <GraphListPanel
+      graphs={availableGraphs}
+      selectedGraph={selectedGraphPath}
+      title="Predicted Graphs"
+      emptyStateMessage="No predicted graphs available"
+      emptyStateHint="Run attack prediction first in the Predict tab"
+      isLoading={false}
+      iconColor="#3b82f6"
+      on:select={(e) => selectGraph(e.detail)}
+    >
+      <svelte:fragment slot="graph-extra" let:graphPath>
+        <div class="graph-stats">
+          {formatGraphStats(graphPath)}
         </div>
-      {:else}
-        <div class="graph-list">
-          {#each availableGraphs as [graphPath, graphData]}
-            <button
-              class="graph-item"
-              class:selected={selectedGraphPath === graphPath}
-              on:click={() => selectGraph(graphPath)}
-              title={graphPath}
-            >
-              <div class="graph-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                  <polyline points="10 9 9 9 8 9"/>
-                </svg>
-              </div>
-              <div class="graph-info">
-                <div class="graph-name">{formatGraphName(graphPath)}</div>
-                <div class="graph-stats">
-                  {graphData.total_nodes} nodes • {graphData.total_edges} edges
-                </div>
-              </div>
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
+      </svelte:fragment>
+    </GraphListPanel>
 
     <!-- Right Panel: Report Display -->
     <div class="right-panel">
@@ -402,7 +379,6 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
     min-height: 600px;
   }
 
-  .left-panel,
   .right-panel {
     background: #1e1e1e;
     border-radius: 8px;
@@ -496,7 +472,7 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
     color: #999;
   }
 
-  .empty-state .hint {
+  .loading-state .hint {
     font-size: 0.875rem;
     color: #666;
   }
@@ -513,63 +489,6 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
 
   @keyframes spin {
     to { transform: rotate(360deg); }
-  }
-
-  .graph-list {
-    max-height: 650px;
-    overflow-y: auto;
-  }
-
-  .graph-item {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.875rem 1.25rem;
-    border: none;
-    border-bottom: 1px solid #333;
-    background: #1e1e1e;
-    cursor: pointer;
-    transition: background 0.2s;
-    text-align: left;
-  }
-
-  .graph-item:hover {
-    background: #2b2b2b;
-  }
-
-  .graph-item.selected {
-    background: #0d0d0d;
-    border-left: 3px solid #3b82f6;
-  }
-
-  .graph-icon {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #3b82f6;
-    border-radius: 6px;
-  }
-
-  .graph-icon svg {
-    width: 20px;
-    height: 20px;
-    color: white;
-  }
-
-  .graph-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .graph-name {
-    font-weight: 600;
-    color: #e0e0e0;
-    margin-bottom: 0.25rem;
-    text-transform: capitalize;
   }
 
   .graph-stats {
