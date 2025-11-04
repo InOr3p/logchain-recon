@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import type { AttackGraphData } from '$lib/schema/models';
+import type { AttackGraphData, AttackReport } from '$lib/schema/models';
 
 
 export let alertMessage = writable('');
@@ -21,6 +21,7 @@ export const selectedLogs = writable<any[]>([]);
 export const agents = writable<any[]>([]);
 export const graphFiles = writable<any[]>([]);
 export const selectedGraphPath = writable<any[]>([]);
+export const generatedReports = writable<Map<string, AttackReport>>(new Map());
 
 
 /**

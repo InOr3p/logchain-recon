@@ -1,7 +1,7 @@
 <script lang="ts">
   import { generateReport, checkReportHealth } from '$lib/controllers/graphs-controller';
   import type { AttackGraphData, AttackReport } from '$lib/schema/models';
-  import { predictedGraphs, showAlert } from '$lib/stores/generalStores';
+  import { generatedReports, predictedGraphs, showAlert } from '$lib/stores/generalStores';
   import { onMount } from 'svelte';
 
   // State management
@@ -40,7 +40,7 @@
   function selectGraph(graphPath: string) {
     selectedGraphPath = graphPath;
     selectedGraphData = $predictedGraphs.get(graphPath) || null;
-    generatedReport = null;
+    generatedReport = $generatedReports.get(selectedGraphPath)!;
     error = null;
   }
 
@@ -66,6 +66,7 @@
 
       if (response.success && response.report) {
         generatedReport = response.report;
+        $generatedReports.set(selectedGraphPath!, generatedReport)
         showAlert('Report generated successfully', 'success', 5000);
       } else {
         error = response.error || 'Failed to generate report';
