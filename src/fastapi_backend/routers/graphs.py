@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 
-from fastapi_backend.models.schemas import AttackReport, BuildGraphsResponse, GenerateReportRequest, GenerateReportResponse, GraphPredictRequest, GraphPredictResponse, LogsRequest
+from fastapi_backend.models.schemas import AttackReport, BuildGraphsResponse, GenerateReportRequest, GenerateReportResponse, GraphPredictRequest, GraphPredictResponse, LogsRequest, ReportHealthResponse
 
 
 router = APIRouter(prefix="/graphs", tags=["Graphs"])
@@ -270,16 +270,23 @@ async def generate_report(
             )
         
         # Check if Ollama is available
-        if not report_service.check_ollama_health():
+        if request_data.llm_engine == "ollama" and not report_service.check_ollama_health():
             raise HTTPException(
                 status_code=503,
                 detail="Ollama service is not available. Please start Ollama and try again."
             )
         
+        elif request_data.llm_engine == "groq" and not report_service.check_groq_health():
+            raise HTTPException(
+                status_code=503,
+                detail="Ollama service is not available. Please start Ollama and try again."
+            )
+                
         # Generate the report
         result = report_service.generate_report(
             graph_summary=request_data.graph_summary,
-            model_name=request_data.model_name
+            model_name=request_data.model_name,
+            llm_engine=request_data.llm_engine
         )
         
         if result.get("success"):
@@ -305,8 +312,8 @@ async def generate_report(
         )
 
 
-@router.get("/report/health")
-async def report_health(request: Request):
+@router.get("/report/health", response_model=ReportHealthResponse)
+async def report_health(request: Request, llm_engine: str):
     """
     Check if the report generation service is healthy.
     
@@ -322,19 +329,29 @@ async def report_health(request: Request):
         if report_service is None:
             return {
                 "status": "unavailable",
-                "ollama_available": False,
+                "available": False,
                 "message": "Report service not initialized"
             }
         
-        ollama_available = report_service.check_ollama_health()
+        engine_name = "Ollama"
+        llm_available = False
+        model_name = report_service.default_ollama_model
+
+        if llm_engine.lower() == 'groq':
+            engine_name = "Groq"
+            llm_available = await report_service.check_groq_health()
+            model_name = report_service.default_groq_model # Use Groq's model name
+        else:
+            engine_name = "Ollama"
+            llm_available = await report_service.check_ollama_health()
+            model_name = report_service.default_ollama_model # Use Ollama's model name
         
-        return {
-            "status": "healthy" if ollama_available else "degraded",
-            "ollama_available": ollama_available,
-            "default_model": report_service.default_model,
-            "ollama_api_url": report_service.ollama_api_url,
-            "message": "Ollama is running" if ollama_available else "Ollama is not accessible"
-        }
+        return ReportHealthResponse(
+            status = "healthy" if llm_available else "degraded",
+            available = llm_available,
+            default_model = model_name,
+            message = f"{engine_name} is running" if llm_available else f"{engine_name} is not accessible"
+        )
         
     except Exception as e:
         raise HTTPException(

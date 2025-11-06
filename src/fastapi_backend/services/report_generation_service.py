@@ -1,211 +1,221 @@
-"""
-Report Generation Service for creating attack analysis reports.
-Place this file at: fastapi_backend/services/report_generation_service.py
-"""
 import json
+import os
+from typing import Dict, Any, Optional, Literal
+from dotenv import load_dotenv
 import requests
-from typing import Dict, Any, Optional
+from fastapi_backend.models.schemas import AttackReport
+from ollama import chat
+from openai import OpenAI
 
+
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path=env_path)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OLLAMA_BASE_URL = "http://localhost:11434"
+
+# --- Define LLM Engine Type ---
+LLMEngine = Literal["ollama", "groq"]
+
+# --- Constants ---
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 class ReportGenerationService:
-    """Service for generating attack analysis reports using a local LLM (Ollama)."""
+    """
+    Service for generating attack analysis reports using Ollama or Groq.
+    
+    Groq relies on the GROQ_API_KEY environment variable.
+    """
     
     def __init__(
         self,
-        ollama_api_url: str = "http://localhost:11434/api/generate",
-        default_model: str = "llama3.2",
-        timeout: int = 180
+        default_ollama_model: str = "llama3.2",
+        default_groq_model: str = "openai/gpt-oss-20b",
+        timeout: int = 180,
     ):
         """
-        Initialize the ReportGenerationService.
+        Initialize the ReportGenerationService, setting up both LLM clients.
         
         Args:
-            ollama_api_url: URL of the Ollama API endpoint
-            default_model: Default LLM model to use
+            default_ollama_model: Default Ollama model to use
+            default_groq_model: Default Groq model to use
             timeout: Request timeout in seconds
+            ollama_host: URL for the local Ollama service
         """
-        self.ollama_api_url = ollama_api_url
-        self.default_model = default_model
+        self.default_ollama_model = default_ollama_model
+        self.default_groq_model = default_groq_model
         self.timeout = timeout
-        print(f"ReportGenerationService initialized with model: {default_model}")
-    
-    def _generate_report_prompt(self, graph_summary: Dict[str, Any]) -> str:
-        """
-        Generate the prompt for the LLM based on the graph summary.
         
-        Args:
-            graph_summary: Summarized attack graph data
-            
-        Returns:
-            Formatted prompt string
-        """
+        # Initialize Groq client (uses GROQ_API_KEY env var)
+        self.groq_client = OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url=GROQ_BASE_URL,
+            timeout=self.timeout
+        )
+        
+        print(f"ReportGenerationService initialized.")
+        print(f"- Ollama (Local): {default_ollama_model}")
+        print(f"- Groq (API): {default_groq_model}")
+
+    
+    def generate_report_prompt(self, graph_summary):
         schema = """
         Your output MUST be ONLY valid JSON and follow this schema exactly:
         {
-            "attack_name": "<short formal name of the detected attack type>",
-            "attack_summary": "<technical summary of 4-5 sentences describing the attack sequence, methods used, and potential impact>",
-            "severity": "<LOW|MEDIUM|HIGH|CRITICAL>",
-            "confidence": "<percentage indicating confidence in the analysis>",
-            "nist_csf_mapping": {
-                "Identify": "<identification stage details - what was discovered>",
-                "Protect": "<defensive controls bypassed or missing>",
-                "Detect": "<what detections occurred and how>",
-                "Respond": "<recommended immediate response actions>",
-                "Recover": "<recommended recovery and hardening steps>"
-            },
-            "attack_timeline": [
-                {
-                    "step": 1,
-                    "action": "<what happened>",
-                    "timestamp": "<timestamp if available>"
-                }
-            ],
-            "recommended_actions": [
-                "<specific mitigation step 1>",
-                "<specific mitigation step 2>",
-                "<specific mitigation step 3>"
-            ],
-            "indicators_of_compromise": [
-                "<IOC 1>",
-                "<IOC 2>"
-            ]
+        "attack_name": "<short formal name of the detected attack type>",
+        "attack_summary": "<technical summary of 4-5 sentences>",
+        "severity": "<Low/Medium/High/Critical>",
+        "confidence": "<score in percentage 0-100>", 
+        "nist_csf_mapping": {
+            "Identify": "<identification stage details>",
+            "Protect": "<defensive controls bypassed>",
+            "Detect": "<what detections occurred>",
+            "Respond": "<recommended immediate response>",
+            "Recover": "<recommended recovery/hardening>"
+        },
+        "attack_timeline": [
+            {"step": 1, "action": "<description of action>", "timestamp": "<if available>"},
+            {"step": 2, "action": "<description of action>", "timestamp": "<if available>"},
+            "... up to N steps ..."
+        ],
+        "recommended_actions": [
+            "<specific mitigation step 1>",
+            "<specific mitigation step 2>",
+            "<specific mitigation step 3>"
+        ],
+        "indicators_of_compromise": [
+            "<IOC 1>",
+            "<IOC 2>",
+            "... up to N IOCs ..."
+        ]
         }
         """
-        
         graph_json = json.dumps(graph_summary, indent=2, default=str)
-        
         return f"""
-You are a cybersecurity incident response analyst with expertise in threat detection and NIST frameworks.
+        You are a cybersecurity incident response analyst.
+        Analyze the following summarized LOGS GRAPH, which represents relationships
+        between security log events detected by an intrusion detection system.
+        Provide a formal, concise technical report of the likely attack type and
+        mapping to the NIST Cybersecurity Framework.
+        Base your reasoning ONLY on the data provided and output strictly formatted JSON.
+        
+        --- BEGIN GRAPH SUMMARY ---
+        {graph_json}
+        --- END GRAPH SUMMARY ---
 
-Analyze the following ATTACK GRAPH, which represents relationships between security log events detected by an intrusion detection system. Each node is a security event, and edges represent temporal or causal relationships with attack probabilities.
+        --- BEGIN EXAMPLE SCHEMA ---
+        {schema}
+        --- END EXAMPLE SCHEMA ---
+        """
 
-Your task:
-1. Identify the type of attack based on the sequence of events
-2. Assess the severity and provide your confidence level
-3. Map the attack to the NIST Cybersecurity Framework stages
-4. Provide a timeline of the attack sequence
-5. Recommend specific, actionable mitigation steps
-6. Extract indicators of compromise
+    def generate_with_ollama(self, prompt, model_name):
+        """Generate a structured report via Ollama (local LLM)."""
+        try:
+            # Ollama API call
+            response = chat(
+                model=model_name,
+                messages=[{
+                    'role': 'user',
+                    'content': prompt,
+                }],
+                # Use Pydantic schema for strict JSON output
+                format=AttackReport.model_json_schema(),
+            )
 
-Base your reasoning ONLY on the data provided. Output must be valid JSON following the exact schema below.
+            raw_json_output = response['message']['content']
+            report_data = json.loads(raw_json_output)
+            return report_data
 
---- BEGIN ATTACK GRAPH DATA ---
-{graph_json}
---- END ATTACK GRAPH DATA ---
-
-{schema}
-
-Remember: Output ONLY the JSON object, no additional text before or after.
-"""
+        except requests.exceptions.Timeout:
+                # Ollama uses the standard requests library under the hood
+                error_msg = f"Ollama Request timeout after {self.timeout} seconds"
+                print(f"Error: {error_msg}")
+                return {"success": False, "error": error_msg}
+        # Catch all other exceptions specific to the Ollama/local connection
+        except Exception as e:
+            error_msg = f"Ollama/Local request failed: {str(e)}"
+            print(f"Error: {error_msg}")
+            return {"success": False, "error": error_msg}
     
+
+    def generate_with_groq(self, prompt, model_name):
+        try:
+            response = self.groq_client.responses.parse(
+                model=model_name,
+                input=[
+                    {"role": "system", "content": prompt},
+                ],
+                text_format=AttackReport,
+            )
+
+            result = response.output_parsed
+            report_dict = result.model_dump()
+            return report_dict
+        
+        except json.JSONDecodeError:
+            error_msg = f"LLM output was not valid JSON..."
+            print(f"Error: {error_msg}")
+            return {"success": False, "error": "LLM output was not valid JSON."}
+        except Exception as e:
+            error_msg = f"Unexpected error during Groq generation: {str(e)}"
+            print(f"Error: {error_msg}")
+            return {"success": False, "error": error_msg}
+
+
     def generate_report(
         self,
         graph_summary: Dict[str, Any],
+        llm_engine: LLMEngine = "ollama",
         model_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generate a structured attack report using Ollama (local LLM).
+        Generate a structured attack report using either Ollama or Groq.
         
         Args:
             graph_summary: Summarized attack graph data
-            model_name: LLM model to use (defaults to self.default_model)
+            llm_engine: The LLM provider to use ("ollama" or "groq")
+            model_name: LLM model to use (defaults to self.default_ollama_model/default_groq_model)
             
         Returns:
-            Dictionary containing the generated report or error information
+            Dictionary containing the generated report (parsed JSON) or error information
         """
-        model = model_name or self.default_model
-        prompt = self._generate_report_prompt(graph_summary)
+
+        prompt = self.generate_report_prompt(graph_summary)
         
-        print(f"Generating report using model: {model}")
+        if llm_engine == "groq":
+            model = model_name or self.default_groq_model
+            print(f"Generating report using Groq model: {model}")
+            report_data = self.generate_with_groq(prompt, model)                 
+            
+        elif llm_engine == "ollama":
+            model = model_name or self.default_ollama_model
+            print(f"Generating report using Ollama model: {model}")
+            report_data = self.generate_with_ollama(prompt, model)      
         
-        try:
-            response = requests.post(
-                self.ollama_api_url,
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": True
-                },
-                timeout=self.timeout,
-                stream=True
-            )
-            
-            response.raise_for_status()
-            
-            # Collect the full response text
-            text = ""
-            for line in response.iter_lines():
-                if line:
-                    try:
-                        data = json.loads(line)
-                        text += data.get("response", "")
-                    except json.JSONDecodeError:
-                        continue
-            
-            text = text.strip()
-            
-            # Try to parse the JSON response
-            try:
-                report = json.loads(text)
-                print("Report generated successfully")
-                return {
-                    "success": True,
-                    "report": report
-                }
-            except json.JSONDecodeError:
-                # Try to extract JSON from the text
-                start = text.find("{")
-                end = text.rfind("}") + 1
-                
-                if start >= 0 and end > start:
-                    try:
-                        report = json.loads(text[start:end])
-                        print("Report extracted from response text")
-                        return {
-                            "success": True,
-                            "report": report
-                        }
-                    except json.JSONDecodeError:
-                        pass
-                
-                # If JSON extraction fails, return raw output
-                print("Warning: Could not parse JSON from LLM response")
-                return {
-                    "success": False,
-                    "error": "Failed to parse JSON from LLM response",
-                    "raw_output": text
-                }
-                
-        except requests.exceptions.Timeout:
-            print(f"Error: Request timeout after {self.timeout} seconds")
-            return {
-                "success": False,
-                "error": f"Request timeout after {self.timeout} seconds"
-            }
-        except requests.exceptions.RequestException as e:
-            print(f"Error: Request failed - {str(e)}")
-            return {
-                "success": False,
-                "error": f"Request failed: {str(e)}"
-            }
-        except Exception as e:
-            print(f"Error: Unexpected error - {str(e)}")
-            return {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}"
-            }
+        else:
+            return {"success": False, "error": f"Unknown LLM engine specified: {llm_engine}"}
     
-    def check_ollama_health(self) -> bool:
+        return {"success": True, "report": report_data}
+    
+
+    async def check_ollama_health(self) -> bool:
         """
-        Check if Ollama service is available.
-        
-        Returns:
-            True if Ollama is running, False otherwise
+        Check if the local Ollama service is available by listing models.
         """
         try:
-            # Try to ping Ollama API
-            base_url = self.ollama_api_url.rsplit('/', 2)[0]  # Get base URL
-            response = requests.get(f"{base_url}/api/tags", timeout=5)
+            response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
             return response.status_code == 200
+        except Exception as e:
+            print(f"Ollama health check failed: {e}")
+            return False
+
+    async def check_groq_health(self) -> bool:
+        """
+        Check if the Groq service is available by listing models.
+        """
+        try:
+            # Attempt a simple, cheap API call (listing models is a good health check)
+            self.groq_client.models.list()
+            return True
         except Exception:
+            # Catches connection errors, timeout, and API key issues
             return False

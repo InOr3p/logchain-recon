@@ -5,6 +5,7 @@
   import { onMount } from 'svelte';
 
   import GraphListPanel from '$lib/components/GraphListPanel.svelte';
+	import { formatAndExportReport } from '$lib/utils';
 
   // State management
   let selectedGraphPath: string | null = null;
@@ -13,30 +14,51 @@
   let isGenerating = false;
   let error: string | null = null;
   let ollamaAvailable = false;
+  let groqAvailable = false;
   let checkingHealth = true;
+  let useGroq = true; // Toggle between Groq (true, default) and Ollama (false)
+
 
   // Reactive statements
   $: availableGraphs = Array.from($predictedGraphs.keys());
-  $: hasGraphs = availableGraphs.length > 0;
 
   onMount(async () => {
-    await checkOllamaHealth();
+    await checkServiceHealth();
   });
 
-  async function checkOllamaHealth() {
+  async function checkServiceHealth() {
     checkingHealth = true;
+    let llm_engine = getLLMStr()
     try {
-      const health = await checkReportHealth();
-      ollamaAvailable = health.ollama_available;
-      if (!ollamaAvailable) {
-        showAlert('Ollama service is not running. Reports cannot be generated.', 'warning', 5000);
+      const health = await checkReportHealth(llm_engine);
+      if (llm_engine === "groq") {
+        groqAvailable = health.available;
+        if (!groqAvailable) {
+          showAlert(`Groq service is not running. Reports cannot be generated.`, 'warning', 5000);
+        }
       }
+      else {
+        ollamaAvailable = health.available;
+        if (!ollamaAvailable) {
+          showAlert(`Ollama service is not running. Reports cannot be generated.`, 'warning', 5000);
+        }
+      } 
     } catch (err) {
-      console.error('Error checking Ollama health:', err);
-      ollamaAvailable = false;
+      console.error(`Error checking ${llm_engine} health: ${err}`);
+      if (llm_engine === "groq") groqAvailable = false;
+      else ollamaAvailable = false;
     } finally {
       checkingHealth = false;
     }
+  }
+
+  async function toggleService(service: 'ollama' | 'groq') {
+    if ((service === 'groq' && useGroq) || (service === 'ollama' && !useGroq)) {
+      return;
+    }
+    
+    useGroq = service === 'groq';
+    await checkServiceHealth();
   }
 
   function selectGraph(graphPath: string) {
@@ -53,8 +75,8 @@
       return;
     }
 
-    if (!ollamaAvailable) {
-      error = 'Ollama service is not available';
+    if ((!useGroq && !ollamaAvailable) || (useGroq && !groqAvailable)) {
+      error = `${getLLMStr(true)} service is not available`;
       showAlert(error, 'danger', 5000);
       return;
     }
@@ -62,9 +84,10 @@
     isGenerating = true;
     error = null;
     generatedReport = null;
+    let llm_engine = getLLMStr()
 
     try {
-      const response = await generateReport(selectedGraphData);
+      const response = await generateReport(selectedGraphData, llm_engine);
 
       if (response.success && response.report) {
         generatedReport = response.report;
@@ -102,53 +125,12 @@
   function exportReport() {
     if (!generatedReport) return;
 
-    const reportText = `
-ATTACK ANALYSIS REPORT
-Generated: ${new Date().toLocaleString()}
-==============================================
+    formatAndExportReport(generatedReport)
+  }
 
-ATTACK IDENTIFICATION
----------------------------------------------
-Attack Name: ${generatedReport.attack_name}
-Severity: ${generatedReport.severity}
-Confidence: ${generatedReport.confidence}
-
-SUMMARY
----------------------------------------------
-${generatedReport.attack_summary}
-
-ATTACK TIMELINE
----------------------------------------------
-${generatedReport.attack_timeline.map(step => 
-  `${step.step}. ${step.action}${step.timestamp ? ' (' + step.timestamp + ')' : ''}`
-).join('\n')}
-
-NIST CYBERSECURITY FRAMEWORK MAPPING
----------------------------------------------
-Identify: ${generatedReport.nist_csf_mapping.Identify}
-Protect: ${generatedReport.nist_csf_mapping.Protect}
-Detect: ${generatedReport.nist_csf_mapping.Detect}
-Respond: ${generatedReport.nist_csf_mapping.Respond}
-Recover: ${generatedReport.nist_csf_mapping.Recover}
-
-RECOMMENDED ACTIONS
----------------------------------------------
-${generatedReport.recommended_actions.map((action, i) => `${i + 1}. ${action}`).join('\n')}
-
-INDICATORS OF COMPROMISE
----------------------------------------------
-${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).join('\n')}
-`;
-
-    const blob = new Blob([reportText], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `attack_report_${Date.now()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    showAlert('Report exported successfully', 'success', 3000);
+  function getLLMStr(capitalize: boolean = false) {
+    if (capitalize) return useGroq? "Groq": "Ollama"
+    else return useGroq? "groq": "ollama"
   }
 </script>
 
@@ -158,13 +140,45 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
     <h1>Attack Report Generator</h1>
     <p class="subtitle mb-3">Generate AI-powered attack analysis reports using local Ollama</p>
     
-    {#if checkingHealth}
-      <div class="health-badge checking">Checking Ollama status...</div>
-    {:else if ollamaAvailable}
-      <div class="health-badge healthy">Ollama Available</div>
-    {:else}
-      <div class="health-badge unavailable">Ollama Unavailable</div>
-    {/if}
+    <div class="header-controls">
+
+    <!-- Service Toggle -->
+      <div class="service-toggle">
+        <button 
+          class="toggle-btn {!useGroq ? 'active' : ''}" 
+          on:click={() => toggleService('ollama')}
+          disabled={checkingHealth}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          Ollama
+        </button>
+        <button 
+          class="toggle-btn {useGroq ? 'active' : ''}" 
+          on:click={() => toggleService('groq')}
+          disabled={checkingHealth}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+          Groq
+        </button>
+      </div>
+
+      <!-- Health Status -->
+      {#if checkingHealth}
+        <div class="health-badge checking">Checking {getLLMStr(true)} status...</div>
+      {:else if (!useGroq && ollamaAvailable) || (useGroq && groqAvailable)}
+        <div class="health-badge healthy">{getLLMStr(true)} Available</div>
+      {:else}
+        <div class="health-badge unavailable">{getLLMStr(true)} Unavailable</div>
+      {/if}
+    </div>
   </div>
 
   <!-- Main Content -->
@@ -205,7 +219,7 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
           <button
             on:click={handleGenerateReport}
             class="btn btn-primary"
-            disabled={isGenerating || !selectedGraphData || !ollamaAvailable}
+            disabled={isGenerating || !selectedGraphData || ((!useGroq && !ollamaAvailable) || (useGroq && !groqAvailable))}
           >
             {isGenerating ? 'Generating...' : 'Generate Report'}
           </button>
@@ -339,11 +353,59 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
     margin-bottom: 2rem;
   }
 
+   .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+
   h1 {
     font-size: 2.5rem;
     font-weight: 700;
     color: #e0e0e0;
     margin: 0 0 0.5rem 0;
+  }
+
+  /* Service Toggle */
+  .service-toggle {
+    display: flex;
+    gap: 0.5rem;
+    background: #0d0d0d;
+    padding: 0.25rem;
+    border-radius: 8px;
+    border: 1px solid #333;
+  }
+
+  .toggle-btn {
+    padding: 0.625rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: transparent;
+    color: #666;
+  }
+
+  .toggle-btn:hover:not(:disabled):not(.active) {
+    background: #1a1a1a;
+    color: #999;
+  }
+
+  .toggle-btn.active {
+    background: #3b82f6;
+    color: #fff;
+  }
+
+  .toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .health-badge {

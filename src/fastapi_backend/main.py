@@ -43,8 +43,8 @@ EDGE_PREDICTOR_MODEL_PATH = os.path.join(AI_MODELS_DIR, "gnn_edge_predictor_10ep
 EDGE_PREDICTOR_HIDDEN_CHANNELS = 128
 
 # Paths for ReportGenerationService
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_DEFAULT_MODEL = "llama3.2"
+# OLLAMA_API_URL = "http://localhost:11434/api/generate"
+# OLLAMA_DEFAULT_MODEL = "llama3.2"
 
 # Directory where the builder will save temporary .npz graph files
 GRAPH_CACHE_DIR = os.path.join("fastapi_backend", "graph_cache")
@@ -54,7 +54,7 @@ LOGS_DATASET_PATH = os.path.join("extracted_dataset", "sorted_ds_with_labels.par
 
 
 @app.on_event("startup")
-def load_all_models():
+async def load_all_models():
     """
     Load all models and feature lists into memory and
     create service instances on app.state.
@@ -120,7 +120,7 @@ def load_all_models():
         print("GraphBuilder is ready.")
         
     except Exception as e:
-        print(f"CRITICAL: Failed to load GraphBuilder. Error: {e}")
+        print(f"Failed to load GraphBuilder. Error: {e}")
         raise e
     
     # 6. Load the EdgePredictorService
@@ -128,7 +128,7 @@ def load_all_models():
     try:
         if not os.path.exists(EDGE_PREDICTOR_MODEL_PATH):
             print(f"Warning: Edge predictor model not found at {EDGE_PREDICTOR_MODEL_PATH}")
-            print("  EdgePredictorService will be available but model will load on first use.")
+            print("EdgePredictorService will be available but model will load on first use.")
         
         edge_predictor_service = EdgePredictorService(
             model_path=EDGE_PREDICTOR_MODEL_PATH,
@@ -139,31 +139,29 @@ def load_all_models():
         print("EdgePredictorService is ready.")
         
     except Exception as e:
-        print(f"CRITICAL: Failed to initialize EdgePredictorService. Error: {e}")
+        print(f"Failed to initialize EdgePredictorService. Error: {e}")
         raise e
     
     # 7. Load the ReportGenerationService
     print("\n--- Loading ReportGenerationService ---")
     try:
         report_service = ReportGenerationService(
-            ollama_api_url=OLLAMA_API_URL,
-            default_model=OLLAMA_DEFAULT_MODEL,
             timeout=180
         )
         
-        # Check if Ollama is available
-        if report_service.check_ollama_health():
-            print("Ollama service is running and accessible")
+        # Check if Groq is available
+        if report_service.check_groq_health():
+            print("Groq service is running and accessible")
         else:
-            print("Warning: Ollama service is not accessible")
-            print("  Reports will fail until Ollama is started")
+            print("Warning: Groq service is not accessible")
+            print("Reports will fail until Groq is started")
         
         app.state.report_service = report_service
         print("ReportGenerationService is ready.")
         
     except Exception as e:
         print(f"Warning: Failed to initialize ReportGenerationService. Error: {e}")
-        print("  Report generation will not be available")
+        print("Report generation will not be available")
         app.state.report_service = None
     
     print("\n--- All models loaded. Service is ready. ---")

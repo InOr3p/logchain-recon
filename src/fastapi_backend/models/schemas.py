@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -82,7 +82,7 @@ class AttackReport(BaseModel):
     """Generated attack analysis report."""
     attack_name: str
     attack_summary: str
-    severity: str
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
     confidence: str
     nist_csf_mapping: NistCsfMapping
     attack_timeline: List[AttackTimelineStep]
@@ -100,6 +100,9 @@ class GenerateReportRequest(BaseModel):
         default=None,
         description="LLM model to use (defaults to configured model)"
     )
+    llm_engine: str = Field(
+        default="ollama"
+    )
 
 
 class GenerateReportResponse(BaseModel):
@@ -114,6 +117,6 @@ class GenerateReportResponse(BaseModel):
 class ReportHealthResponse(BaseModel):
     """Response model for report service health check."""
     status: str
-    ollama_available: bool
+    available: bool
     default_model: str
     message: Optional[str] = None

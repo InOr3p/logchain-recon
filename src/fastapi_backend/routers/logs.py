@@ -31,7 +31,6 @@ async def classify_logs(logs: List[LogItem], request: Request):
     except Exception as e:
         print(f"Error during preprocessing: {e}")
         import traceback
-        traceback.print_exc() # Print full stack trace
         raise HTTPException(
             status_code=400, # Bad Request
             detail=f"Data preprocessing error: {e}. Check log format."

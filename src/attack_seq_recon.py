@@ -1,6 +1,7 @@
 import json
 import os
 import math
+from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 import requests
@@ -8,14 +9,22 @@ import torch
 from collections import defaultdict
 from torch_geometric.data import Data
 import networkx as nx
+from fastapi_backend.models.schemas import AttackReport
 from training_edge_predictor import EdgePredictorGNN
 import random
+from ollama import chat
+from openai import OpenAI
+
 
 random.seed(42)
 np.random.seed(42)
 
 EXTRACT_DIR = 'extracted_dataset'
 HIDDEN_CHANNELS = 128
+
+env_path = os.path.join("fastapi_backend", "services", ".env")
+load_dotenv(dotenv_path=env_path)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # ===========================================================
 # --------------------- HELPER FUNCTIONS --------------------
@@ -48,7 +57,7 @@ def load_model(in_channels):
     print("Instantiating model structure...")
     model = EdgePredictorGNN(in_channels=in_channels, hidden_channels=HIDDEN_CHANNELS)
 
-    model_path = os.path.join('models', 'gnn_edge_predictor_10epochs.pth')
+    model_path = os.path.join('models', 'gnn_edge_predictor_sage_10epochs.pth')
     print(f"Loading model weights from {model_path}...")
     model.load_state_dict(torch.load(model_path))
     print("Model weights loaded successfully.")
@@ -262,6 +271,8 @@ def generate_report_prompt(graph_summary):
     {
     "attack_name": "<short formal name of the detected attack type>",
     "attack_summary": "<technical summary of 4-5 sentences>",
+    "severity": "<Low/Medium/High/Critical>",
+    "confidence": "<score in percentage 0-100>", 
     "nist_csf_mapping": {
         "Identify": "<identification stage details>",
         "Protect": "<defensive controls bypassed>",
@@ -269,10 +280,20 @@ def generate_report_prompt(graph_summary):
         "Respond": "<recommended immediate response>",
         "Recover": "<recommended recovery/hardening>"
     },
+    "attack_timeline": [
+        {"step": 1, "action": "<description of action>", "timestamp": "<if available>"},
+        {"step": 2, "action": "<description of action>", "timestamp": "<if available>"},
+        "... up to N steps ..."
+    ],
     "recommended_actions": [
         "<specific mitigation step 1>",
         "<specific mitigation step 2>",
         "<specific mitigation step 3>"
+    ],
+    "indicators_of_compromise": [
+        "<IOC 1>",
+        "<IOC 2>",
+        "... up to N IOCs ..."
     ]
     }
     """
@@ -287,43 +308,48 @@ def generate_report_prompt(graph_summary):
     --- BEGIN GRAPH SUMMARY ---
     {graph_json}
     --- END GRAPH SUMMARY ---
+
+    --- BEGIN EXAMPLE SCHEMA ---
     {schema}
+    --- END EXAMPLE SCHEMA ---
     """
 
 
-def generate_attack_report_local(graph_summary, model_name="llama3.2"):
+def generate_attack_report_local(prompt, model_name="llama3.2"):
     """Generate a structured report via Ollama (local LLM)."""
-    prompt = generate_report_prompt(graph_summary)
     try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model_name, 
-                "prompt": prompt,
-                # "options": {
-                #     "temperature": 0.0,   # deterministic decoding
-                #     "num_predict": 512
-                # }
-            },
-            timeout=180
+        # Ollama API call
+        response = chat(
+            model=model_name,
+            messages=[{
+                'role': 'user',
+                'content': prompt,
+            }],
+            # Use Pydantic schema for strict JSON output
+            format=AttackReport.model_json_schema(),
         )
 
-        text = ""
-        for line in response.iter_lines():
-            if line:
-                data = json.loads(line)
-                text += data.get("response", "")
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            start, end = text.find("{"), text.rfind("}") + 1
-            if start >= 0 and end > start:
-                return json.loads(text[start:end])
-            return {"raw_output": text}
+        raw_json_output = response['message']['content']
+        report_data = json.loads(raw_json_output)
+        print("Report: ", report_data)
+        return report_data
+
     except Exception as e:
         return {"error": str(e)}
 
+def generate_attack_report_groq(client, prompt, model_name="openai/gpt-oss-20b"):
+    response = client.responses.parse(
+        model=model_name,
+        input=[
+            {"role": "system", "content": prompt},
+        ],
+        text_format=AttackReport,
+    )
+
+    result = response.output_parsed
+    report_dict = result.model_dump()
+    print(report_dict)  
+    return report_dict
 
 def display_attack_report(report):
     print("\n--- AI-GENERATED ATTACK REPORT ---")
@@ -341,6 +367,7 @@ def display_attack_report(report):
 # ===========================================================
 
 def main():
+    llm_engine = "groq"
     logs_df = load_dataset()
     node_features_np, edge_index_np, log_ids_np, in_channels = load_graph()
     model = load_model(in_channels=in_channels)
@@ -358,7 +385,18 @@ def main():
         print(f"Summary includes {graph_summary['important_nodes']} nodes and {graph_summary['important_edges']} edges.")
 
         print("\nGenerating AI Report using Local LLM...")
-        report = generate_attack_report_local(graph_summary, model_name="llama3.2")
+        prompt = generate_report_prompt(graph_summary)
+        print(f"Using {llm_engine}...\n")
+
+        if llm_engine == "ollama":
+            report = generate_attack_report_local(prompt)
+        else:
+            client = OpenAI(
+                api_key=GROQ_API_KEY,
+                base_url="https://api.groq.com/openai/v1",
+            )
+            print("Groq loaded\n")
+            report = generate_attack_report_groq(client=client, prompt=prompt)
         display_attack_report(report)
     else:
         print("No attack edges above threshold — skipping report generation.")

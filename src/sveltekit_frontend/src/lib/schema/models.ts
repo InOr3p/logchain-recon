@@ -165,6 +165,7 @@ export interface AttackReport {
 export interface GenerateReportRequest {
   graph_summary: AttackGraphData;
   model_name?: string;
+  llm_engine: string;
 }
 
 /**
@@ -193,8 +194,7 @@ export interface PredictedGraph {
  */
 export interface ReportHealthResponse {
   status: string;
-  ollama_available: boolean;
+  available: boolean;
   default_model: string;
-  ollama_api_url?: string;
   message?: string;
 }

@@ -77,11 +77,13 @@ export async function predictAttackGraph(
  */
 export async function generateReport(
   graphSummary: AttackGraphData,
+  llm_engine: string,
   modelName?: string
 ): Promise<GenerateReportResponse> {
   const requestBody: GenerateReportRequest = {
     graph_summary: graphSummary,
-    model_name: modelName
+    model_name: modelName,
+    llm_engine: llm_engine
   };
   
   console.log('Generating report for attack graph:', {
@@ -105,6 +107,6 @@ export async function generateReport(
  * Checks the health status of the report generation service.
  * @returns A promise that resolves to ReportHealthResponse
  */
-export async function checkReportHealth(): Promise<ReportHealthResponse> {
-  return apiFetch("/graphs/report/health");
+export async function checkReportHealth(llm_engine: string): Promise<ReportHealthResponse> {
+  return apiFetch(`/graphs/report/health?llm_engine=${llm_engine}`);
 }
