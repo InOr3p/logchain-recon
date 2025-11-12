@@ -8,9 +8,8 @@ from fastapi_backend.models.schemas import AttackReport, BuildGraphsResponse, Ge
 
 router = APIRouter(prefix="/graphs", tags=["Graphs"])
 
-# --- 2. ADD THE RESPONSE MODEL ---
 @router.post("/build", response_model=BuildGraphsResponse)
-async def build_graphs_endpoint(
+async def build_graphs(
     request: Request, 
     graph_request: LogsRequest 
 ):

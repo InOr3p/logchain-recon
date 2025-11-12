@@ -1,11 +1,9 @@
 import ast
-from collections import Counter
 import json
 import os
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from itertools import combinations
 from tqdm import tqdm
 from sklearn.metrics.pairwise import cosine_similarity
 from datetime import timedelta
