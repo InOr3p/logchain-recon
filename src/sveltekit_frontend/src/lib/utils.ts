@@ -51,3 +51,14 @@ ${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).j
     
     showAlert('Report exported successfully', 'success', 3000);
   }
+
+
+export function formatDate(date: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(date));
+}

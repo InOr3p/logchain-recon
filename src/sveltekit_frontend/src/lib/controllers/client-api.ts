@@ -1,4 +1,4 @@
-export const BASE_URL = "http://127.0.0.1:8000"; // FastAPI backend
+export const BASE_URL = "http://127.0.0.1:9000"; // FastAPI backend
 
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   const res = await fetch(`${BASE_URL}${endpoint}`, {

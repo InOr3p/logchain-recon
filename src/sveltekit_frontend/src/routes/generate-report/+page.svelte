@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
 
   import GraphListPanel from '$lib/components/GraphListPanel.svelte';
-	import { formatAndExportReport } from '$lib/utils';
+	import { formatAndExportReport, formatDate } from '$lib/utils';
 
   // State management
   let selectedGraphPath: string | null = null;
@@ -273,7 +273,7 @@
                   <div class="timeline-content">
                     <div class="timeline-action">{step.action}</div>
                     {#if step.timestamp}
-                      <div class="timeline-timestamp">{step.timestamp}</div>
+                      <div class="timeline-timestamp">{formatDate(step.timestamp)}</div>
                     {/if}
                   </div>
                 </div>

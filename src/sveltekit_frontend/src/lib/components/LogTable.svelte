@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { getLogs, getAgents } from "$lib/controllers/logs-controller";
   import { logs, selectedLogs, showAlert, agents } from "$lib/stores/generalStores";
+	import { formatDate } from "$lib/utils";
   
   const ITEMS_PER_PAGE = 10;
   let currentPage = 1;
@@ -307,7 +308,7 @@
                           on:click|stopPropagation={() => toggleLogSelection(log)}
                         />
                       </td>
-                      <td class="text-muted">{log.timestamp}</td>
+                      <td class="text-muted">{formatDate(log.timestamp)}</td>
                       <td>{log.rule_description ?? "—"}</td>
                       <td><span class="badge-code">{log.rule_id ?? "—"}</span></td>
                       <td>

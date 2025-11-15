@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatDate } from '$lib/utils';
   import { createEventDispatcher } from 'svelte';
   
   export let selectedElement: any = null;
@@ -81,7 +82,7 @@
         
         <div class="detail-section">
           <div class="detail-label">Timestamp</div>
-          <div class="detail-value">{selectedElement.timestamp}</div>
+          <div class="detail-value">{formatDate(selectedElement.timestamp)}</div>
         </div>
       {:else}
         <!-- Edge Details -->
@@ -95,7 +96,7 @@
           
           <div class="detail-section">
             <div class="detail-label">Timestamp</div>
-            <div class="detail-value">{selectedElement.timestamp}</div>
+            <div class="detail-value">{formatDate(selectedElement.timestamp)}</div>
           </div>
         {:else}
           <div class="detail-section">
@@ -119,7 +120,7 @@
             </div>
             <div class="node-detail-item">
               <span class="detail-item-label">Timestamp:</span>
-              <span class="detail-item-value">{selectedElement.source.timestamp}</span>
+              <span class="detail-item-value">{formatDate(selectedElement.source.timestamp)}</span>
             </div>
           </div>
         </div>
@@ -139,7 +140,7 @@
             </div>
             <div class="node-detail-item">
               <span class="detail-item-label">Timestamp:</span>
-              <span class="detail-item-value">{selectedElement.target.timestamp}</span>
+              <span class="detail-item-value">{formatDate(selectedElement.target.timestamp)}</span>
             </div>
           </div>
         </div>

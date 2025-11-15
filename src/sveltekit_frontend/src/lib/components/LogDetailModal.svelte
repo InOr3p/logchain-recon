@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { LogItem } from '$lib/schema/models';
+	import { formatDate } from '$lib/utils';
   
   export let showModal: boolean = false;
   export let log: LogItem | null = null;
@@ -66,7 +67,7 @@
           
           <div class="detail-item">
             <span class="detail-label">Created at:</span>
-            <span class="detail-value">{log.timestamp}</span>
+            <span class="detail-value">{formatDate(log.timestamp)}</span>
           </div>
           
           {#if log.rule_groups && log.rule_groups.length > 0}
