@@ -51,9 +51,7 @@ class WazuhLogClassifier:
 
         print(f"Dataset shape: {self.df.shape}")
         print(f"\nClass distribution:\n{self.df['attack_label'].value_counts()}")
-        
-        return self
-    
+            
 
     def load_and_preprocess_fixed_data(self):
         """
@@ -145,9 +143,8 @@ class WazuhLogClassifier:
         
         attack_logs_in_final_df = self.df[self.df['attack_label'] == 'attack']
         print(f"\nFinal 'type_attack_label' distribution for attacks:\n{attack_logs_in_final_df['type_attack_label'].value_counts()}")
-        
-        return self
-    
+
+
     def _one_hot_encode_cat_cols(self, col_str, col_name, col_values):
         for el in col_values:
             col_name = f'{col_str}{el}'
@@ -333,9 +330,7 @@ class WazuhLogClassifier:
             
         print(f"Train set: {self.X_train.shape[0]} samples")
         print(f"Test set: {self.X_test.shape[0]} samples")
-        
-        return self
-    
+            
 
     def train_neural_network(self, epochs=20, batch_size=32, n_splits=5):
         """
@@ -492,7 +487,6 @@ class WazuhLogClassifier:
         # Print final test metrics
         self._print_metrics('SimpleNN', y_pred, y_pred_proba)
 
-        return self
 
     
     def train_lightgbm(self):
@@ -576,7 +570,6 @@ class WazuhLogClassifier:
         print("\nTop 10 Most Important Features:")
         print(feature_importance.head(10).to_string(index=False))
         
-        return self
     
     def train_catboost(self):
         """Train CatBoost classifier with hyperparameter tuning."""
@@ -651,7 +644,6 @@ class WazuhLogClassifier:
         print("\nTop 10 Most Important Features:")
         print(feature_importance.head(10).to_string(index=False))
         
-        return self
     
     def train_xgboost(self):
         """Train XGBoost classifier with hyperparameter tuning."""
@@ -734,7 +726,6 @@ class WazuhLogClassifier:
         print("\nTop 10 Most Important Features:")
         print(feature_importance.head(10).to_string(index=False))
         
-        return self
     
     def _print_metrics(self, model_name, y_pred, y_pred_proba):
         """Print evaluation metrics for a model."""
