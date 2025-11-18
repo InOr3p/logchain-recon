@@ -35,7 +35,7 @@ EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
 AI_MODELS_DIR = os.path.join("fastapi_backend", "AI_models")
 
 # Paths for ClassifierService
-LIGHTGBM_PATH = os.path.join(AI_MODELS_DIR, "LightGBM_fd_all_cat.joblib")
+CLASSIFIER_PATH = os.path.join(AI_MODELS_DIR, "XGBoost_fd_all_cat.joblib")
 FEATURE_LIST_PATH = os.path.join(AI_MODELS_DIR, "feature_columns.joblib")
 
 # Paths for EdgePredictorService
@@ -62,10 +62,10 @@ async def load_all_models():
     print("--- Application Startup: Loading models ---")
     
     # 1. Load LightGBM model
-    if not os.path.exists(LIGHTGBM_PATH):
-        raise FileNotFoundError(f"Model file not found: {LIGHTGBM_PATH}")
-    lgbm_model = joblib.load(LIGHTGBM_PATH)
-    print(f"Successfully loaded LightGBM model from {LIGHTGBM_PATH}")
+    if not os.path.exists(CLASSIFIER_PATH):
+        raise FileNotFoundError(f"Model file not found: {CLASSIFIER_PATH}")
+    lgbm_model = joblib.load(CLASSIFIER_PATH)
+    print(f"Successfully loaded LightGBM model from {CLASSIFIER_PATH}")
     
     # 2. Load expected feature columns list
     if not os.path.exists(FEATURE_LIST_PATH):

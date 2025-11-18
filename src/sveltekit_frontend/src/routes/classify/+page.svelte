@@ -165,7 +165,7 @@
   <!-- Header -->
   <div class="header">
     <h1>Classify logs</h1>
-    <p class="subtitle">Classify logs as <code>benign</code> or <code>attack</code> by using LightGBM model</p>
+    <p class="subtitle">Classify logs as <code>benign</code> or <code>attack</code> by using XGBoost model</p>
   </div>
 
   <button class="btn btn-primary mt-4" on:click={handleClassify} disabled={isLoading}>

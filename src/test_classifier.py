@@ -278,10 +278,10 @@ class LogEvaluator:
 if __name__ == "__main__":
     # Configuration
     EXTRACT_DIR = "extracted_dataset"
-    MODEL_PATH = "models/LightGBM_fd_all_cat.joblib"
+    MODEL_PATH = os.path.join("models", "LightGBM_fd_all_cat.joblib")
     FEATURE_COLUMNS_PATH = os.path.join(EXTRACT_DIR, "feature_columns.joblib")
     LOG_FILE = os.path.join(EXTRACT_DIR, "logs_export_2025-10-29.csv")
-    OUTPUT_FILE = os.path.join(EXTRACT_DIR, "evaluation_results.csv")
+    OUTPUT_FILE = os.path.join(EXTRACT_DIR, "lightgbm_evaluation_results_11-18.csv")
         
     # Check if files exist
     if not os.path.exists(MODEL_PATH):
