@@ -42,10 +42,6 @@ FEATURE_LIST_PATH = os.path.join(AI_MODELS_DIR, "feature_columns.joblib")
 EDGE_PREDICTOR_MODEL_PATH = os.path.join(AI_MODELS_DIR, "gnn_edge_predictor_10epochs.pth")
 EDGE_PREDICTOR_HIDDEN_CHANNELS = 128
 
-# Paths for ReportGenerationService
-# OLLAMA_API_URL = "http://localhost:11434/api/generate"
-# OLLAMA_DEFAULT_MODEL = "llama3.2"
-
 # Directory where the builder will save temporary .npz graph files
 GRAPH_CACHE_DIR = os.path.join("fastapi_backend", "graph_cache")
 
@@ -61,11 +57,11 @@ async def load_all_models():
     """
     print("--- Application Startup: Loading models ---")
     
-    # 1. Load LightGBM model
+    # 1. Load classifier model
     if not os.path.exists(CLASSIFIER_PATH):
         raise FileNotFoundError(f"Model file not found: {CLASSIFIER_PATH}")
     lgbm_model = joblib.load(CLASSIFIER_PATH)
-    print(f"Successfully loaded LightGBM model from {CLASSIFIER_PATH}")
+    print(f"Successfully loaded classifier model from {CLASSIFIER_PATH}")
     
     # 2. Load expected feature columns list
     if not os.path.exists(FEATURE_LIST_PATH):
