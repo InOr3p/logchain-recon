@@ -87,7 +87,6 @@ class AttackReport(BaseModel):
     nist_csf_mapping: NistCsfMapping
     attack_timeline: List[AttackTimelineStep]
     recommended_actions: List[str]
-    indicators_of_compromise: List[str]
 
 
 class GenerateReportRequest(BaseModel):

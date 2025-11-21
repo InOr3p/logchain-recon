@@ -156,7 +156,6 @@ export interface AttackReport {
   nist_csf_mapping: NistCsfMapping;
   attack_timeline: AttackTimelineStep[];
   recommended_actions: string[];
-  indicators_of_compromise: string[];
 }
 
 /**

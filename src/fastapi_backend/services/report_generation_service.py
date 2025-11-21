@@ -81,11 +81,6 @@ class ReportGenerationService:
             "<specific mitigation step 1>",
             "<specific mitigation step 2>",
             "<specific mitigation step 3>"
-        ],
-        "indicators_of_compromise": [
-            "<IOC 1>",
-            "<IOC 2>",
-            "... up to N IOCs ..."
         ]
         }
         """

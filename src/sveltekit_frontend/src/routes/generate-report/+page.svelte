@@ -317,16 +317,6 @@
               {/each}
             </ol>
           </div>
-
-          <!-- IOCs -->
-          <div class="report-section">
-            <h4>Indicators of Compromise</h4>
-            <ul class="ioc-list">
-              {#each generatedReport.indicators_of_compromise as ioc}
-                <li class="ioc-item">{ioc}</li>
-              {/each}
-            </ul>
-          </div>
         </div>
       {:else}
         <div class="empty-state">
@@ -684,25 +674,16 @@
     line-height: 1.5;
   }
 
-  /* Actions & IOCs */
-  .actions-list,
-  .ioc-list {
+  /* Actions */
+  .actions-list {
     margin: 0;
     padding-left: 1.5rem;
   }
 
-  .actions-list li,
-  .ioc-list li {
+  .actions-list li {
     color: #d0d0d0;
     margin-bottom: 0.75rem;
     line-height: 1.5;
   }
 
-  .ioc-item {
-    font-family: 'Courier New', monospace;
-    background: #0d0d0d;
-    padding: 0.5rem;
-    border-radius: 4px;
-    border-left: 3px solid #ef4444;
-  }
 </style>

@@ -35,10 +35,6 @@ Recover: ${generatedReport.nist_csf_mapping.Recover}
 RECOMMENDED ACTIONS
 ---------------------------------------------
 ${generatedReport.recommended_actions.map((action, i) => `${i + 1}. ${action}`).join('\n')}
-
-INDICATORS OF COMPROMISE
----------------------------------------------
-${generatedReport.indicators_of_compromise.map((ioc, i) => `${i + 1}. ${ioc}`).join('\n')}
 `;
 
     const blob = new Blob([reportText], { type: 'text/plain' });
